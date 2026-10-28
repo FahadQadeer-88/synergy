@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in | Synergy Electric Inventory Management System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --red: #ed1c24;
+  --red-deep: #c4141b;
+  --white: #ffffff;
+  --steel: #36434e;        /* panel steel, lighter */
+  --steel-2: #435260;
+  --line: #61717d;
+  --ink-on-dark: #f1f3f4;
+  --soft-on-dark: #cbd4da;
+  --lamp-green: #34c76a;
+  --lamp-amber: #f2a900;
+  --lamp-red: #ff3b30;
+  --focus: #7cc0ff;
+  --pad: clamp(28px, 6vw, 72px);
+  --font: "Archivo", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+  background: var(--steel);
+  color: var(--ink-on-dark);
+}
+.shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(380px, 0.85fr);
+}
+
+/* ---------- Brand side: the logo's own white ground ---------- */
+.brand {
+  background: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+}
+.brand img {
+  display: block;
+  width: min(100%, 620px);
+  height: auto;
+}
+
+/* ---------- Form side: the "panel" ---------- */
+.panel {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(165deg, #3f4e5a 0%, #34414c 60%, #2f3b46 100%);
+  border-top: 6px solid var(--red);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 0 var(--pad);
+}
+.panel-inner { position: relative; z-index: 1; width: 100%; max-width: 400px; flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; padding: clamp(14px, 4vh, 44px) 0; }
+
+.head { display: block; }
+h1 {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 700;
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+.system {
+  margin: 10px 0 0;
+  color: var(--soft-on-dark);
+  font-size: 15px;
+  max-width: 26ch;
+}
+
+/* Indicator lamps: the one memorable element */
+.lamps {
+  display: flex; align-self: flex-start; flex-direction: row; gap: 9px;
+  padding: 8px 12px;
+  background: #27323b;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  margin-bottom: 22px;
+}
+.lamp {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #55646f;
+  transition: background .2s, box-shadow .2s;
+}
+.lamps[data-state="busy"] .lamp.amber { background: var(--lamp-amber); box-shadow: 0 0 10px 1px rgba(242,169,0,.7); }
+.lamps[data-state="ok"]   .lamp.green { background: var(--lamp-green); box-shadow: 0 0 10px 1px rgba(52,199,106,.7); }
+.lamps[data-state="fail"] .lamp.red   { background: var(--lamp-red);   box-shadow: 0 0 10px 1px rgba(255,59,48,.7); }
+
+form { margin-top: 36px; }
+.field { display: block; margin-bottom: 20px; }
+.field > span { display: block; font-size: 14px; font-weight: 600; margin-bottom: 7px; }
+.control { position: relative; }
+input {
+  width: 100%;
+  height: 50px;
+  padding: 0 14px;
+  font: inherit;
+  color: var(--ink-on-dark);
+  background: var(--steel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  transition: border-color .15s, background .15s;
+}
+input::placeholder { color: #9fadb7; }
+input:hover { border-color: #8496a3; }
+input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-color: transparent; }
+input[aria-invalid="true"] { border-color: var(--lamp-red); }
+#password { padding-right: 76px; }
+.toggle {
+  position: absolute; right: 6px; top: 6px; height: 38px;
+  padding: 0 12px;
+  font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--soft-on-dark);
+  background: transparent; border: 0; border-radius: 3px; cursor: pointer;
+}
+.toggle:hover { color: var(--white); }
+.toggle:focus-visible { outline: 2px solid var(--focus); }
+
+.message {
+  min-height: 24px;
+  margin: -4px 0 16px;
+  font-size: 14px;
+  color: #ff8d86;
+}
+.message.ok { color: #7be0a0; }
+
+.submit {
+  width: 100%; height: 52px;
+  font: inherit; font-size: 17px; font-weight: 700; font-stretch: 108%;
+  color: var(--white);
+  background: var(--red);
+  border: 0; border-radius: 4px; cursor: pointer;
+  transition: background .15s, transform .08s;
+}
+.submit:hover { background: var(--red-deep); }
+.submit:active { transform: translateY(1px); }
+.submit:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.submit:disabled { background: #7a3338; color: #e3c3c5; cursor: not-allowed; }
+
+.foot { margin: 28px 0 0; font-size: 13px; color: var(--soft-on-dark); }
+
+/* ---------- Small screens: logo on top, form below ---------- */
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .brand { padding: 28px 24px; }
+  .brand img { width: min(100%, 380px); }
+  .panel { justify-content: flex-start; }
+  .panel-inner { margin: 0 auto; }
+  h1 { font-size: 34px; }
+}
+
+
+/* ---------- Busbar and breaker rig along the bottom of the panel ---------- */
+.rig { display: block; flex: 0 0 auto; width: calc(100% + 2 * var(--pad)); margin: 0 calc(-1 * var(--pad)); height: clamp(80px, 16vh, 150px); pointer-events: none; }
+.bus { fill: none; stroke-width: 7; opacity: .38; }
+.pulse { fill: none; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 16 150; animation: flow 3.2s linear infinite; }
+.pulse.p2 { animation-delay: -1.07s; }
+.pulse.p3 { animation-delay: -2.14s; }
+.drop { stroke: #9db0bd; stroke-width: 2; opacity: .55; fill: none; }
+.drop-pulse { stroke: #ffffff; stroke-width: 2.5; stroke-linecap: round; fill: none; stroke-dasharray: 8 60; opacity: .8; animation: flow 2.4s linear infinite; }
+.joint { fill: #9db0bd; opacity: .8; }
+.mccb { fill: #2a353e; stroke: #9db0bd; stroke-width: 2; }
+.handle { stroke: #dfe7ec; stroke-width: 3; stroke-linecap: round; transform-origin: center; transform-box: fill-box; }
+.led { fill: var(--lamp-green); animation: blink 3.6s ease-in-out infinite; }
+.led.l2 { animation-delay: -.9s; } .led.l3 { animation-delay: -1.8s; } .led.l4 { animation-delay: -2.7s; }
+@keyframes flow { to { stroke-dashoffset: -166; } }
+@keyframes blink { 0%, 70%, 100% { opacity: .25; } 80%, 90% { opacity: 1; } }
+/* Signed in: the breaker closes and current runs faster */
+.panel.live .pulse { animation-duration: .8s; }
+.panel.live .drop-pulse { animation-duration: .6s; opacity: 1; }
+.panel.live .led { animation: none; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .pulse, .drop-pulse, .led { animation: none !important; }
+}
+
+
+/* ---------- Short windows: tighten spacing so nothing needs scrolling ---------- */
+@media (max-height: 760px) {
+  .lamps { margin-bottom: 14px; padding: 6px 10px; }
+  h1 { font-size: 34px; }
+  .system { margin-top: 6px; font-size: 14px; }
+  form { margin-top: 20px; }
+  .field { margin-bottom: 12px; }
+  .field > span { margin-bottom: 5px; }
+  input { height: 44px; }
+  #password { padding-right: 70px; }
+  .toggle { height: 32px; top: 5px; }
+  .message { min-height: 20px; margin: -2px 0 10px; }
+  .submit { height: 46px; font-size: 16px; }
+  .foot { margin-top: 14px; }
+}
+@media (max-height: 600px) {
+  .lamps { margin-bottom: 10px; }
+  h1 { font-size: 30px; }
+  .system { display: none; }
+  form { margin-top: 14px; }
+  .field { margin-bottom: 8px; }
+  .foot { display: none; }
+}
+
+/* One quiet moment on load: the lamps flick on in sequence, then settle */
+@keyframes flick { 0% { background:#55646f; box-shadow:none; } 50% { background: var(--c); box-shadow: 0 0 10px 1px var(--c); } 100% { background:#55646f; box-shadow:none; } }
+.lamps.boot .lamp.red   { --c: var(--lamp-red);   animation: flick .55s .10s both; }
+.lamps.boot .lamp.amber { --c: var(--lamp-amber); animation: flick .55s .35s both; }
+.lamps.boot .lamp.green { --c: var(--lamp-green); animation: flick .55s .60s both; }
+@media (prefers-reduced-motion: reduce) {
+  .lamps.boot .lamp { animation: none !important; }
+  .lamp, input, .submit { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <section class="brand">
+    <img src="logo.JPEG" alt="Synergy, LV / MV Switchgear Manufacturers">
+  </section>
+
+  <main class="panel" id="panel">
+    <div class="panel-inner">
+      <div class="lamps boot" id="lamps" data-state="idle" aria-hidden="true">
+        <span class="lamp red"></span><span class="lamp amber"></span><span class="lamp green"></span>
+      </div>
+      <div class="head">
+        <h1>Sign in</h1>
+        <p class="system">Synergy Electric Inventory Management System</p>
+      </div>
+
+      <form id="login-form" novalidate autocomplete="on">
+        <label class="field">
+          <span>ID</span>
+          <div class="control">
+            <input id="uid" name="username" type="email" inputmode="email" autocomplete="username"
+                   placeholder="name@synergy.com" autocapitalize="none" spellcheck="false" required>
+          </div>
+        </label>
+
+        <label class="field">
+          <span>Password</span>
+          <div class="control">
+            <input id="password" name="password" type="password" autocomplete="current-password"
+                   placeholder="Enter your password" required>
+            <button class="toggle" id="toggle" type="button" aria-controls="password" aria-pressed="false">Show</button>
+          </div>
+        </label>
+
+        <p class="message" id="message" role="alert" aria-live="polite"></p>
+
+        <button class="submit" id="submit" type="submit">Sign in</button>
+      </form>
+
+      <p class="foot">For authorised Synergy staff only.</p>
+    </div>
+    <svg class="rig" viewBox="-1200 0 2965 160" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
+      <line class="bus" x1="-1200" y1="24" x2="1765" y2="24" stroke="#ff4d4f"/>
+      <line class="pulse p1" x1="-1200" y1="24" x2="1765" y2="24" stroke="#ff4d4f"/>
+      <line class="bus" x1="-1200" y1="40" x2="1765" y2="40" stroke="#f5c518"/>
+      <line class="pulse p2" x1="-1200" y1="40" x2="1765" y2="40" stroke="#f5c518"/>
+      <line class="bus" x1="-1200" y1="56" x2="1765" y2="56" stroke="#4aa3ff"/>
+      <line class="pulse p3" x1="-1200" y1="56" x2="1765" y2="56" stroke="#4aa3ff"/>
+      <line class="drop" x1="80" y1="24" x2="80" y2="104"/>
+      <line class="drop-pulse" x1="80" y1="24" x2="80" y2="104" style="animation-delay:-0.5s"/>
+      <circle class="joint" cx="80" cy="24" r="3"/>
+      <circle class="joint" cx="80" cy="40" r="3"/>
+      <circle class="joint" cx="80" cy="56" r="3"/>
+      <rect class="mccb" x="63" y="104" width="34" height="46" rx="4"/>
+      <line class="handle" x1="80" y1="124" x2="80" y2="136"/>
+      <circle class="led l1" cx="80" cy="113" r="3"/>
+      <line class="drop" x1="215" y1="24" x2="215" y2="104"/>
+      <line class="drop-pulse" x1="215" y1="24" x2="215" y2="104" style="animation-delay:-1.0s"/>
+      <circle class="joint" cx="215" cy="24" r="3"/>
+      <circle class="joint" cx="215" cy="40" r="3"/>
+      <circle class="joint" cx="215" cy="56" r="3"/>
+      <rect class="mccb" x="198" y="104" width="34" height="46" rx="4"/>
+      <line class="handle" x1="215" y1="124" x2="215" y2="136"/>
+      <circle class="led l2" cx="215" cy="113" r="3"/>
+      <line class="drop" x1="350" y1="24" x2="350" y2="104"/>
+      <line class="drop-pulse" x1="350" y1="24" x2="350" y2="104" style="animation-delay:-1.5s"/>
+      <circle class="joint" cx="350" cy="24" r="3"/>
+      <circle class="joint" cx="350" cy="40" r="3"/>
+      <circle class="joint" cx="350" cy="56" r="3"/>
+      <rect class="mccb" x="333" y="104" width="34" height="46" rx="4"/>
+      <line class="handle" x1="350" y1="124" x2="350" y2="136"/>
+      <circle class="led l3" cx="350" cy="113" r="3"/>
+      <line class="drop" x1="485" y1="24" x2="485" y2="104"/>
+      <line class="drop-pulse" x1="485" y1="24" x2="485" y2="104" style="animation-delay:-2.0s"/>
+      <circle class="joint" cx="485" cy="24" r="3"/>
+      <circle class="joint" cx="485" cy="40" r="3"/>
+      <circle class="joint" cx="485" cy="56" r="3"/>
+      <rect class="mccb" x="468" y="104" width="34" height="46" rx="4"/>
+      <line class="handle" x1="485" y1="124" x2="485" y2="136"/>
+      <circle class="led l4" cx="485" cy="113" r="3"/>
+    </svg>
+  </main>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ------------------------------------------------------------------
+  // Saved accounts. Passwords are stored as salted SHA-256 hashes,
+  // not as plain text. Hash = SHA-256("synergy-sim:" + id + ":" + password)
+  // ------------------------------------------------------------------
+  var ACCOUNTS = {
+    "office@synergy.com": { hash: "7705392c059ac9413c0c773770641f593d1398f3e6eed038c4e7625d665e9e5e", role: "office", page: "office.html" },
+    "admin@synergy.com":  { hash: "7a3f95b788556eaabeeb856ce1c3ea97f8d7ba7a1dd713a33c45cf3f2635ba22", role: "admin",  page: "admin.html"  },
+    "store@synergy.com":  { hash: "6334bd1f5414a25b105431c94f1249957ee4bf8eacf8fa99ec17899b6258b2e7", role: "store",  page: "store.html"  }
+  };
+  var MAX_TRIES = 5, LOCK_SECONDS = 30;
+
+  // Small self-contained SHA-256 (works on file:// and http:// alike)
+  function sha256(str) {
+    var K = [
+      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+    var H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    var bytes = new TextEncoder().encode(str);
+    var len = bytes.length, total = (((len + 9 + 63) >> 6) << 6);
+    var buf = new Uint8Array(total);
+    buf.set(bytes); buf[len] = 0x80;
+    var dv = new DataView(buf.buffer);
+    dv.setUint32(total - 8, Math.floor(len * 8 / 4294967296));
+    dv.setUint32(total - 4, (len * 8) >>> 0);
+    var w = new Uint32Array(64);
+    function rr(x, n) { return (x >>> n) | (x << (32 - n)); }
+    for (var off = 0; off < total; off += 64) {
+      for (var i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
+      for (i = 16; i < 64; i++) {
+        var s0 = rr(w[i-15],7) ^ rr(w[i-15],18) ^ (w[i-15] >>> 3);
+        var s1 = rr(w[i-2],17) ^ rr(w[i-2],19) ^ (w[i-2] >>> 10);
+        w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
+      }
+      var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+      for (i = 0; i < 64; i++) {
+        var S1 = rr(e,6) ^ rr(e,11) ^ rr(e,25);
+        var ch = (e & f) ^ (~e & g);
+        var t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+        var S0 = rr(a,2) ^ rr(a,13) ^ rr(a,22);
+        var maj = (a & b) ^ (a & c) ^ (b & c);
+        var t2 = (S0 + maj) >>> 0;
+        h=g; g=f; f=e; e=(d + t1) >>> 0; d=c; c=b; b=a; a=(t1 + t2) >>> 0;
+      }
+      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+    }
+    return H.map(function (x) { return ("00000000" + x.toString(16)).slice(-8); }).join("");
+  }
+  function hashFor(id, pw) { return sha256("synergy-sim:" + id + ":" + pw); }
+
+  // Expose for testing only
+  window.__synergyHash = hashFor;
+
+  var $ = function (s) { return document.querySelector(s); };
+  var form = $("#login-form"), uid = $("#uid"), pw = $("#password");
+  var msg = $("#message"), lamps = $("#lamps"), btn = $("#submit"), tog = $("#toggle");
+  var tries = 0, lockTimer = null;
+
+  function lamp(state) { lamps.classList.remove("boot"); lamps.setAttribute("data-state", state); }
+  function say(text, ok) { msg.textContent = text; msg.className = "message" + (ok ? " ok" : ""); }
+  function invalid(on) { uid.setAttribute("aria-invalid", on); pw.setAttribute("aria-invalid", on); }
+
+  tog.addEventListener("click", function () {
+    var show = pw.type === "password";
+    pw.type = show ? "text" : "password";
+    tog.textContent = show ? "Hide" : "Show";
+    tog.setAttribute("aria-pressed", String(show));
+    pw.focus();
+  });
+
+  [uid, pw].forEach(function (el) {
+    el.addEventListener("input", function () {
+      if (lamps.getAttribute("data-state") === "fail") { lamp("idle"); invalid(false); if (!lockTimer) say(""); }
+    });
+  });
+
+  function lock() {
+    var left = LOCK_SECONDS;
+    btn.disabled = true;
+    lamp("fail");
+    (function tick() {
+      say("Too many attempts. Try again in " + left + " seconds.");
+      if (left-- > 0) { lockTimer = setTimeout(tick, 1000); }
+      else { lockTimer = null; tries = 0; btn.disabled = false; lamp("idle"); say(""); }
+    })();
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (lockTimer) return;
+
+    var id = uid.value.trim().toLowerCase(), pass = pw.value;
+    if (!id || !pass) {
+      invalid(true); lamp("fail");
+      say(!id ? "Enter your ID." : "Enter your password.");
+      (!id ? uid : pw).focus();
+      return;
+    }
+
+    lamp("busy"); say(""); btn.disabled = true; btn.textContent = "Checking";
+
+    // Short pause so the amber lamp is seen, and to slow down guessing
+    setTimeout(function () {
+      var acc = ACCOUNTS[id];
+      if (acc && hashFor(id, pass) === acc.hash) {
+        lamp("ok"); invalid(false); $("#panel").classList.add("live");
+        say("Signed in. Opening your workspace.", true);
+        btn.textContent = "Signed in";
+        try {
+          sessionStorage.setItem("sim-session", JSON.stringify({ id: id, role: acc.role, at: Date.now() }));
+        } catch (err) {}
+        setTimeout(function () { window.location.href = acc.page; }, 800);
+      } else {
+        tries++;
+        btn.textContent = "Sign in"; btn.disabled = false;
+        invalid(true); lamp("fail");
+        pw.value = ""; pw.focus();
+        if (tries >= MAX_TRIES) lock();
+        else say("ID or password is incorrect. Check both and try again.");
+      }
+    }, 450);
+  });
+
+  uid.focus();
+})();
+</script>
+</body>
+</html>

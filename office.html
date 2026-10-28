@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<!--
+=====================================================================
+ SWITCHGEAR INVENTORY - OFFICE VERSION (restricted rights)
+ Office can: view inventory + projects list, stock in, stock out.
+ Office cannot: edit / adjust / delete, open project details, see dashboard or history.
+ Firebase project: synergy-5b2d3
+
+ Firestore rules in use for now (Firebase console → Firestore → Rules):
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.time < timestamp.date(2027, 1, 31);
+    }
+  }
+}
+=====================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Switchgear Inventory - Office</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+/* Palette taken from the switchgear floor:
+   panel grey (RAL 7035), steel blue-grey ink, copper busbar accent,
+   and indicator-lamp colours for stock status. */
+:root {
+  color-scheme: light;
+  --bg: #e4e5e1;          /* RAL 7035 light grey */
+  --surface: #f7f7f5;
+  --surface-2: #eeefec;
+  --ink: #1e2a33;         /* steel blue-grey */
+  --ink-soft: #55626c;
+  --line: #c9ccc6;
+  --sidebar: #22303a;
+  --sidebar-ink: #d8dee2;
+  --sidebar-active: #2e3f4b;
+  --accent: #a8572a;      /* copper busbar */
+  --accent-ink: #ffffff;
+  --accent-soft: #f1e2d7;
+  --lamp-ok: #2f9e4f;
+  --lamp-low: #e3a417;
+  --lamp-out: #d23b2f;
+  --danger: #b3261e;
+  --focus: #1f6fb2;
+  --radius: 6px;
+  --font: "Barlow", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-head: "Barlow Semi Condensed", "Barlow", "Segoe UI", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #151b20;
+    --surface: #1d252c;
+    --surface-2: #232d35;
+    --ink: #e3e7ea;
+    --ink-soft: #9aa6af;
+    --line: #34414b;
+    --sidebar: #11171b;
+    --sidebar-ink: #c9d1d7;
+    --sidebar-active: #22303a;
+    --accent: #d07a45;
+    --accent-ink: #1a1009;
+    --accent-soft: #3b2a1f;
+    --danger: #ff8a80;
+    --focus: #6fb3ef;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--bg);
+  font-variant-numeric: tabular-nums;
+}
+h1, h2, h3 { font-family: var(--font-head); line-height: 1.15; margin: 0; }
+h1 { font-size: 28px; font-weight: 700; }
+h2 { font-size: 26px; font-weight: 700; }
+h3 { font-size: 17px; font-weight: 600; margin-bottom: 12px; }
+p { margin: 0; }
+.muted { color: var(--ink-soft); }
+.small { font-size: 13px; }
+.hidden { display: none !important; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Indicator lamps: the one recognisable motif */
+.lamp {
+  display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+  vertical-align: middle; flex: none;
+  box-shadow: inset 0 -2px 3px rgba(0,0,0,.25), 0 0 0 2px rgba(0,0,0,.08);
+}
+.lamp-ok { background: var(--lamp-ok); }
+.lamp-low { background: var(--lamp-low); }
+.lamp-out { background: var(--lamp-out); }
+
+/* Inputs & buttons */
+input, select, textarea {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 8px 10px; min-height: 38px; width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--focus); outline-offset: -1px; border-color: transparent; }
+label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; font-size: 14px; }
+label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; white-space: nowrap; }
+label.check input { width: auto; min-height: 0; }
+
+.btn {
+  font: inherit; font-weight: 600; font-size: 14px;
+  padding: 8px 14px; min-height: 38px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: var(--surface-2); }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+.btn-danger { color: var(--danger); }
+.btn-small { padding: 4px 10px; min-height: 30px; font-size: 13px; }
+.btn-ghost { background: transparent; border-color: rgba(255,255,255,.2); color: inherit; }
+.btn-ghost:hover { background: rgba(255,255,255,.08); }
+.btn-block { width: 100%; }
+.btn-link { background: none; border: 0; color: var(--ink-soft); font: inherit; cursor: pointer; text-decoration: underline; padding: 4px; }
+.link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-align: left; font-weight: 600; }
+.link:hover { text-decoration: underline; }
+
+/* Full-screen states */
+.center-screen { min-height: 100%; display: grid; place-items: center; padding: 24px; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.login-card {
+  width: 100%; max-width: 380px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; padding: 28px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.login-mark { display: flex; gap: 6px; }
+.error-text { color: var(--danger); font-size: 14px; min-height: 1em; }
+
+/* Layout */
+#app { display: grid; grid-template-columns: 230px 1fr; min-height: 100%; }
+.sidebar {
+  background: var(--sidebar); color: var(--sidebar-ink);
+  display: flex; flex-direction: column; padding: 18px 12px;
+  position: sticky; top: 0; height: 100vh;
+}
+.sidebar-brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-head); font-weight: 700; font-size: 18px; padding: 4px 10px 20px; }
+#nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+#nav a { color: var(--sidebar-ink); text-decoration: none; padding: 9px 12px; border-radius: var(--radius); font-weight: 500; border-left: 3px solid transparent; }
+#nav a:hover { background: var(--sidebar-active); }
+#nav a.active { background: var(--sidebar-active); border-left-color: var(--accent); color: #fff; }
+.sidebar-user { border-top: 1px solid rgba(255,255,255,.12); padding: 14px 10px 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.user-name { font-weight: 600; }
+.user-role { font-size: 13px; opacity: .7; }
+.topbar { display: none; }
+
+main { padding: 28px 32px 60px; min-width: 0; }
+.page { display: none; flex-direction: column; gap: 18px; max-width: 1280px; }
+.page.active { display: flex; }
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 6px 16px; }
+.page-head > p { flex-basis: 100%; }
+.head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+.panel.flush { padding: 0; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid-2 > .panel { min-width: 0; }
+
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.kpi { padding: 16px 18px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); }
+.kpi:last-child { border-right: 0; }
+.kpi-label { color: var(--ink-soft); font-size: 14px; }
+.kpi-value { font-family: var(--font-head); font-size: 34px; font-weight: 700; }
+.chart-box { position: relative; height: 260px; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.toolbar > input[type=search] { flex: 1 1 240px; width: auto; }
+.toolbar > select { width: auto; min-width: 160px; }
+.toolbar > label { flex-direction: row; align-items: center; gap: 6px; }
+.toolbar > label input { width: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 14px; color: var(--ink-soft); align-items: center; }
+.legend > span { display: inline-flex; align-items: center; gap: 6px; }
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+.span-2 { grid-column: span 2; }
+.input-row { display: flex; gap: 8px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-weight: 600; color: var(--ink-soft); background: var(--surface-2); white-space: nowrap; position: sticky; top: 0; }
+tbody tr:hover { background: var(--surface-2); }
+td.num, th.num { text-align: right; }
+td.nowrap { white-space: nowrap; }
+td .model { font-weight: 600; }
+td .desc { color: var(--ink-soft); font-size: 13px; }
+.empty { padding: 28px 12px; text-align: center; color: var(--ink-soft); }
+.lines-table input { width: 90px; min-height: 32px; padding: 4px 8px; text-align: right; }
+tr.short td { background: rgba(210,59,47,.08); }
+.short-note { color: var(--danger); font-size: 13px; }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.tag { display: inline-block; white-space: nowrap; padding: 1px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--surface-2); border: 1px solid var(--line); }
+.tag-OUT { background: var(--accent-soft); border-color: transparent; }
+.tag-IN, .tag-RETURN { background: rgba(47,158,79,.14); border-color: transparent; }
+.tag-ADJUST, .tag-OPENING { background: rgba(227,164,23,.18); border-color: transparent; }
+.plus { color: var(--lamp-ok); font-weight: 600; }
+.minus { color: var(--accent); font-weight: 600; }
+
+/* Item picker */
+.picker-row { display: grid; grid-template-columns: 1fr 110px auto; gap: 10px; margin-bottom: 14px; }
+.picker { position: relative; }
+.picker-list {
+  position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  max-height: 320px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+}
+.picker-option { padding: 8px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+.picker-option:last-child { border-bottom: 0; }
+.picker-option.hl, .picker-option:hover { background: var(--surface-2); }
+.picker-option .avail { white-space: nowrap; color: var(--ink-soft); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+
+/* Project detail */
+.detail-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+.detail-stats { display: flex; gap: 28px; margin: 8px 0 16px; }
+.detail-stats div { display: flex; flex-direction: column; }
+.detail-stats strong { font-family: var(--font-head); font-size: 24px; }
+
+/* Modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(10,15,20,.55); display: grid; place-items: center; padding: 16px; z-index: 100; }
+.modal { background: var(--surface); border-radius: 10px; width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; border: 1px solid var(--line); }
+.modal header { padding: 18px 20px 0; }
+.modal .modal-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.modal footer { padding: 0 20px 18px; display: flex; justify-content: flex-end; gap: 10px; }
+
+/* Toasts & banner */
+#toast-root { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
+.toast { background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--radius); max-width: 380px; font-weight: 500; }
+.toast.error { background: var(--danger); color: #fff; }
+.banner { background: var(--lamp-low); color: #1d1500; padding: 10px 14px; border-radius: var(--radius); font-weight: 600; margin-bottom: 16px; }
+
+/* Responsive */
+@media (max-width: 1000px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .kpi:nth-child(2) { border-right: 0; }
+  .kpi:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .grid-2 { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  #app { grid-template-columns: 1fr; }
+  .topbar { display: flex; align-items: center; gap: 12px; background: var(--sidebar); color: var(--sidebar-ink); padding: 10px 14px; position: sticky; top: 0; z-index: 30; }
+  .topbar-title { font-family: var(--font-head); font-weight: 700; }
+  .sidebar { position: fixed; z-index: 40; width: 250px; left: 0; top: 0; transform: translateX(-100%); transition: transform .2s; }
+  .sidebar.open { transform: none; }
+  main { padding: 18px 14px 50px; }
+  .form-grid { grid-template-columns: 1fr; }
+  .span-2 { grid-column: auto; }
+  .picker-row { grid-template-columns: 1fr 90px; }
+  .picker-row .btn { grid-column: span 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+@media print {
+  .sidebar, .topbar, .head-actions, .toolbar { display: none !important; }
+}
+
+/* Please-wait overlay */
+.busy-backdrop { position: fixed; inset: 0; z-index: 300; background: rgba(10,15,20,.45); display: grid; place-items: center; padding: 16px; }
+.busy-box { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 24px 28px; width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.busy-bar { width: 100%; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; position: relative; }
+.busy-bar span { position: absolute; top: 0; bottom: 0; width: 40%; background: var(--accent); border-radius: 3px; animation: busy 1.1s ease-in-out infinite; }
+@keyframes busy { from { left: -40%; } to { left: 100%; } }
+.picker-option.disabled { opacity: .5; cursor: not-allowed; }
+
+</style>
+  <!-- Excel import/export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <!-- Loading -->
+  <div id="loading-screen" class="center-screen"><div class="spinner" aria-label="Loading"></div></div>
+
+  <!-- Application -->
+  <div id="app" class="hidden">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <span class="lamp lamp-ok" aria-hidden="true"></span>
+        <span>Switchgear Inventory <small style="opacity:.7">(Office)</small></span>
+      </div>
+      <nav id="nav">
+        <a href="#stock-out" data-page="stock-out" data-roles="office">Stock out</a>
+        <a href="#stock-in" data-page="stock-in" data-roles="office">Stock in</a>
+        <a href="#inventory" data-page="inventory" data-roles="office">Inventory</a>
+        <a href="#projects" data-page="projects" data-roles="office">Projects</a>
+      </nav>
+      <div class="sidebar-user">
+        <div id="user-name" class="user-name"></div>
+        <div id="user-role" class="user-role"></div>
+        <button id="logout-btn" class="btn btn-small btn-ghost" type="button">Change name</button>
+      </div>
+    </aside>
+
+    <header class="topbar">
+      <button id="menu-btn" class="btn btn-small btn-ghost" type="button" aria-label="Open menu">☰ Menu</button>
+      <span class="topbar-title">Switchgear Inventory (Office)</span>
+    </header>
+
+    <main id="main">
+      <div id="offline-banner" class="banner hidden" role="status">No internet connection. Stock movements can’t be saved until you’re back online.</div>
+
+      <!-- STOCK OUT -->
+      <section id="page-stock-out" class="page">
+        <header class="page-head"><h2>Stock out</h2><p class="muted">Issue components from the store to a project.</p></header>
+        <div class="panel">
+          <div class="form-grid">
+            <label>Project
+              <div class="input-row">
+                <select id="out-project"></select>
+                <button class="btn" id="out-new-project" type="button">New project</button>
+              </div>
+            </label>
+            <label>Issued to <input id="out-issued-to" placeholder="Person receiving the material"></label>
+            <label class="span-2">Remarks <input id="out-remarks" placeholder="Optional"></label>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Components</h3>
+          <div id="out-picker"></div>
+          <div class="table-wrap"><table id="out-lines" class="lines-table"></table></div>
+          <div class="form-actions">
+            <button class="btn" id="out-clear" type="button">Clear</button>
+            <button class="btn btn-primary" id="out-submit" type="button">Issue stock</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- STOCK IN -->
+      <section id="page-stock-in" class="page">
+        <header class="page-head"><h2>Stock in</h2><p class="muted">Receive components from a supplier, or take back material returned from a project.</p></header>
+        <div class="panel">
+          <div class="form-grid">
+            <label>Received from
+              <select id="in-source">
+                <option value="IN">Supplier delivery</option>
+                <option value="RETURN">Return from project</option>
+              </select>
+            </label>
+            <label id="in-supplier-wrap">Supplier <input id="in-supplier" list="supplier-list" placeholder="e.g. ABB distributor (optional)"></label>
+            <label id="in-project-wrap" class="hidden">Project <select id="in-project"></select></label>
+            <label>Reference <input id="in-reference" placeholder="PO, invoice or delivery challan no. (optional)"></label>
+            <label class="span-2">Remarks <input id="in-remarks" placeholder="Optional"></label>
+          </div>
+          <datalist id="supplier-list"></datalist>
+        </div>
+        <div class="panel">
+          <h3>Components</h3>
+          <div id="in-picker"></div>
+          <div class="table-wrap"><table id="in-lines" class="lines-table"></table></div>
+          <div class="form-actions">
+            <button class="btn" id="in-clear" type="button">Clear</button>
+            <button class="btn btn-primary" id="in-submit" type="button">Receive stock</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- INVENTORY -->
+      <section id="page-inventory" class="page">
+        <header class="page-head">
+          <h2>Inventory</h2>
+          <div class="head-actions">
+            <button class="btn manager-only" id="inv-add" type="button">Add item</button>
+            <button class="btn manager-only" id="inv-import" type="button">Import from Excel</button>
+            <button class="btn manager-only" id="inv-template" type="button">Download import template</button>
+            <button class="btn" id="inv-export" type="button">Export to Excel</button>
+            <input type="file" id="inv-import-file" accept=".xlsx,.xls,.csv" class="hidden">
+          </div>
+        </header>
+        <div class="toolbar">
+          <input type="search" id="inv-search" placeholder="Search description…">
+          <select id="inv-brand" class="hidden"><option value="">All brands</option></select>
+          <select id="inv-category" class="hidden"><option value="">All categories</option></select>
+          <label class="check"><input type="checkbox" id="inv-low"> Low or out of stock only</label>
+        </div>
+        <div class="legend">
+          <span><span class="lamp lamp-ok"></span> In stock</span>
+          <span><span class="lamp lamp-low"></span> At or below minimum</span>
+          <span><span class="lamp lamp-out"></span> Out of stock</span>
+          <span class="muted" id="inv-count"></span>
+        </div>
+        <div class="panel flush"><div class="table-wrap"><table id="inv-table"></table></div></div>
+      </section>
+
+      <!-- PROJECTS -->
+      <section id="page-projects" class="page">
+        <header class="page-head">
+          <h2>Projects</h2>
+          <div class="head-actions"><button class="btn staff-only" id="proj-add" type="button">New project</button></div>
+        </header>
+        <div class="toolbar">
+          <input type="search" id="proj-search" placeholder="Search project no., name or client…">
+          <select id="proj-status">
+            <option value="">All statuses</option>
+            <option value="Open" selected>Open</option>
+            <option value="Closed">Closed</option>
+          </select>
+        </div>
+        <div class="panel flush"><div class="table-wrap"><table id="proj-table"></table></div></div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+
+  <script type="module">
+// =====================================================================
+// Switchgear Inventory — main application
+// Plain JavaScript + Firebase Firestore (test mode, no sign-in)
+// =====================================================================
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
+  onSnapshot, query, where, orderBy, limit, runTransaction, writeBatch,
+  serverTimestamp, Timestamp
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// =====================================================================
+// 1) FIREBASE CONFIG
+// =====================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyBLdRAJQOQ-lvYG5QPRsle_VJ_z1472hJo",
+  authDomain: "synergy-5b2d3.firebaseapp.com",
+  projectId: "synergy-5b2d3",
+  storageBucket: "synergy-5b2d3.firebasestorage.app",
+  messagingSenderId: "729568031110",
+  appId: "1:729568031110:web:3fd2421a90b05538787c07"
+};
+
+// 2) YOUR COMPANY DETAILS (printed on issue slips)
+const company = {
+  name: "Your Company Name",
+  address: "Plot / Street, City"
+};
+// =====================================================================
+
+// ---------------------------------------------------------------------
+// Firebase setup
+// ---------------------------------------------------------------------
+const fbApp = initializeApp(firebaseConfig);
+// Local cache makes the app load fast and lets people browse stock while offline.
+const db = initializeFirestore(fbApp, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
+
+// ---------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------
+const DEFAULT_BRANDS = ["ABB", "Schneider Electric", "Siemens", "Legrand", "Eaton", "Mitsubishi Electric", "LS Electric", "Chint", "Hager", "Terasaki"];
+const DEFAULT_CATEGORIES = ["ACB", "MCCB", "MCB", "RCCB / RCBO", "Contactor", "Overload relay", "Protection relay", "Changeover switch", "Isolator", "Meter", "Current transformer", "Indicator / Push button", "Busbar", "Terminal", "Enclosure", "Accessory", "Other"];
+const TYPE_LABEL = { OUT: "Stock out", IN: "Stock in", RETURN: "Return", ADJUST: "Adjustment", OPENING: "Opening stock" };
+const VOUCHER_PREFIX = { OUT: "SO-", IN: "SI-", RETURN: "SR-", ADJUST: "ADJ-" };
+const ROLE_LABEL = { office: "Office (limited)", admin: "Administrator", manager: "Manager", warehouse: "Warehouse", viewer: "Viewer (read only)", pending: "Waiting for approval", disabled: "Disabled" };
+
+// ---------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------
+const state = {
+  user: null,
+  profile: null,       // { name, role }
+  items: new Map(),    // itemId -> item
+  projects: new Map(), // projectId -> project
+  unsub: []
+};
+
+// ---------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------
+const $ = (sel) => document.querySelector(sel);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtNum = (n) => Number(n || 0).toLocaleString();
+const role = () => state.profile?.role;
+const isManager = () => ["admin", "manager"].includes(role());
+const isStaff = () => ["admin", "manager", "warehouse", "office"].includes(role());
+
+function toDate(ts) {
+  if (!ts) return null;
+  if (ts instanceof Date) return ts;
+  if (typeof ts.toDate === "function") return ts.toDate();
+  return new Date(ts);
+}
+function fmtDateTime(ts) {
+  const d = toDate(ts);
+  if (!d) return "";
+  return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) + " " +
+         d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+function isoDate(d) {
+  const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return z.toISOString().slice(0, 10);
+}
+function makeItemId(brand, model) {
+  return `${brand}_${model}`.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function stockStatus(item) {
+  const q = Number(item.qty || 0), min = Number(item.minQty || 0);
+  if (q <= 0) return "out";
+  if (q <= min) return "low";
+  return "ok";
+}
+function lamp(status) {
+  const title = { ok: "In stock", low: "At or below minimum", out: "Out of stock" }[status];
+  return `<span class="lamp lamp-${status}" title="${title}" aria-label="${title}"></span>`;
+}
+function itemLabel(it) { return `${it.brand || ""} ${it.model || ""}`.trim() || it.description || "Unnamed item"; }
+// Secondary line: skip the description when it is already used as the main label
+function itemSub(it) { return (it.brand || it.model) ? (it.description || "") : ""; }
+function docData(snap) { return { id: snap.id, ...snap.data({ serverTimestamps: "estimate" }) }; }
+
+function toast(msg, isError = false) {
+  const el = document.createElement("div");
+  el.className = "toast" + (isError ? " error" : "");
+  el.textContent = msg;
+  $("#toast-root").appendChild(el);
+  setTimeout(() => el.remove(), isError ? 7000 : 4000);
+}
+
+// Full-screen "please wait" overlay for anything that talks to the server
+let busyTimer = null;
+function showBusy(message) {
+  hideBusy();
+  const el = document.createElement("div");
+  el.id = "busy-overlay";
+  el.className = "busy-backdrop";
+  el.setAttribute("role", "status");
+  el.innerHTML = `<div class="busy-box"><div class="spinner"></div><strong>${esc(message)}</strong>
+    <div class="busy-bar"><span></span></div><p class="muted small" id="busy-note">Please wait, don’t close this page.</p></div>`;
+  document.body.appendChild(el);
+  busyTimer = setTimeout(() => {
+    const n = document.getElementById("busy-note");
+    if (n) n.textContent = "This is taking longer than usual. Check the internet connection; it will finish on its own once the server responds.";
+  }, 8000);
+}
+function hideBusy() {
+  clearTimeout(busyTimer);
+  document.getElementById("busy-overlay")?.remove();
+}
+
+function emptyRow(cols, text) {
+  return `<tr><td colspan="${cols}" class="empty">${esc(text)}</td></tr>`;
+}
+
+// Generic modal. fields are read by onSubmit from the modal element.
+function openModal({ title, body, submitLabel = "Save", onSubmit, hideCancel = false, cancelLabel = "Cancel" }) {
+  const root = $("#modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <header><h2 id="modal-title">${esc(title)}</h2></header>
+        <div class="modal-body">${body}</div>
+        <footer>
+          ${hideCancel ? "" : `<button class="btn" data-act="cancel" type="button">${esc(cancelLabel)}</button>`}
+          ${onSubmit ? `<button class="btn btn-primary" data-act="ok" type="button">${esc(submitLabel)}</button>` : ""}
+        </footer>
+      </div>
+    </div>`;
+  const modal = root.querySelector(".modal");
+  const close = () => { root.innerHTML = ""; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  root.querySelector('[data-act="cancel"]')?.addEventListener("click", close);
+  const okBtn = root.querySelector('[data-act="ok"]');
+  okBtn?.addEventListener("click", async () => {
+    okBtn.disabled = true;
+    try {
+      showBusy("Saving…");
+      const keepOpen = await onSubmit(modal);
+      hideBusy();
+      if (keepOpen !== true) close();
+    } catch (err) {
+      console.error(err);
+      toast(err.message || String(err), true);
+    } finally {
+      hideBusy();
+      okBtn.disabled = false;
+    }
+  });
+  const first = modal.querySelector("input, select, textarea");
+  (first || okBtn)?.focus();
+  return { modal, close };
+}
+
+// ---------------------------------------------------------------------
+// No sign-in for now: everyone using the app has full access.
+// The person's name is remembered on this computer and saved with every movement.
+// ---------------------------------------------------------------------
+function showScreen(id) {
+  ["#loading-screen", "#app"].forEach((s) => $(s).classList.add("hidden"));
+  $(id).classList.remove("hidden");
+}
+function getUserName() { try { return localStorage.getItem("inv-user-name") || ""; } catch { return ""; } }
+function setUserName(n) { try { localStorage.setItem("inv-user-name", n); } catch {} }
+function askName(onDone) {
+  openModal({
+    title: "Who is using this computer?",
+    body: `<p class="muted">Your name is saved with every stock movement, so the history shows who entered what.</p>
+      <label>Your name <input id="nm-name" value="${esc(getUserName())}"></label>`,
+    submitLabel: "Continue",
+    hideCancel: !getUserName(),
+    onSubmit: async (m) => {
+      const n = m.querySelector("#nm-name").value.trim();
+      if (!n) { toast("Enter your name.", true); return true; }
+      setUserName(n);
+      onDone(n);
+    }
+  });
+}
+function boot(name) {
+  state.user = { uid: "no-login", email: "" };
+  state.profile = { name, role: "office" };
+  startApp();
+}
+$("#logout-btn").addEventListener("click", () => askName((n) => {
+  state.profile.name = n;
+  $("#user-name").textContent = n;
+}));
+
+// ---------------------------------------------------------------------
+// App start / live data
+// ---------------------------------------------------------------------
+function stopListeners() {
+  state.unsub.forEach((u) => u());
+  state.unsub = [];
+  state.items.clear();
+  state.projects.clear();
+}
+
+function startApp() {
+  $("#user-name").textContent = state.profile.name || state.user.email;
+  $("#user-role").textContent = "Office (limited access)";
+  document.querySelectorAll("#nav a").forEach((a) => {
+    a.classList.toggle("hidden", !a.dataset.roles.split(",").includes(role()));
+  });
+  document.querySelectorAll(".manager-only").forEach((el) => el.classList.toggle("hidden", !isManager()));
+  document.querySelectorAll(".staff-only").forEach((el) => el.classList.toggle("hidden", !isStaff()));
+  showScreen("#app");
+
+  // Items — live
+  state.unsub.push(onSnapshot(collection(db, "items"), (snap) => {
+    state.items.clear();
+    snap.forEach((d) => state.items.set(d.id, docData(d)));
+    onItemsChanged();
+  }, (err) => toast("Couldn’t load items: " + err.message, true)));
+
+  // Projects — live
+  state.unsub.push(onSnapshot(collection(db, "projects"), (snap) => {
+    state.projects.clear();
+    snap.forEach((d) => state.projects.set(d.id, docData(d)));
+    onProjectsChanged();
+  }, (err) => toast("Couldn’t load projects: " + err.message, true)));
+
+
+  route();
+}
+
+function onItemsChanged() {
+  refreshFilterOptions();
+  renderInventory();
+  outForm.render();
+  inForm.render();
+}
+function onProjectsChanged() {
+  fillProjectSelects();
+  renderProjects();
+}
+
+// ---------------------------------------------------------------------
+// Routing
+// ---------------------------------------------------------------------
+function route() {
+  if (!state.profile) return;
+  let page = (location.hash || "#stock-out").slice(1);
+  const link = document.querySelector(`#nav a[data-page="${page}"]`);
+  if (!link || link.classList.contains("hidden")) page = "stock-out";
+  document.querySelectorAll(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + page));
+  document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
+  $("#sidebar").classList.remove("open");
+  window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route);
+$("#menu-btn").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
+
+// Connection banner
+function updateOnline() { $("#offline-banner").classList.toggle("hidden", navigator.onLine); }
+window.addEventListener("online", updateOnline);
+window.addEventListener("offline", updateOnline);
+updateOnline();
+
+// ---------------------------------------------------------------------
+// Stock movements (the core: always done inside a Firestore transaction
+// so quantities stay correct even when two people save at once)
+// ---------------------------------------------------------------------
+async function commitMovement(type, header, lines) {
+  if (!navigator.onLine) throw new Error("No internet connection. Connect and try again.");
+  const sign = type === "OUT" ? -1 : 1;
+  const counterRef = doc(db, "counters", type);
+  const itemRefs = lines.map((l) => doc(db, "items", l.itemId));
+
+  return runTransaction(db, async (tx) => {
+    // 1. Read everything first (Firestore rule: all reads before writes)
+    // All reads in parallel: one round trip to the server instead of one per item
+    const [counterSnap, ...itemSnaps] = await Promise.all([tx.get(counterRef), ...itemRefs.map((r) => tx.get(r))]);
+
+    // 2. Validate
+    const updates = itemSnaps.map((snap, i) => {
+      if (!snap.exists()) throw new Error("An item in this list was deleted. Remove it and try again.");
+      const item = snap.data();
+      const current = Number(item.qty || 0);
+      const qty = Number(lines[i].qty);
+      const next = current + sign * qty;
+      if (next < 0) {
+        throw new Error(`Not enough stock for ${itemLabel(item)}: ${current} available, ${qty} requested.`);
+      }
+      return { ref: itemRefs[i], item, current, qty, next };
+    });
+
+    // 3. Write
+    const seq = (counterSnap.exists() ? Number(counterSnap.data().seq || 0) : 0) + 1;
+    const voucherNo = VOUCHER_PREFIX[type] + String(seq).padStart(6, "0");
+    tx.set(counterRef, { seq }, { merge: true });
+
+    const userName = state.profile.name || state.user.email;
+    for (const u of updates) {
+      tx.update(u.ref, { qty: u.next, updatedAt: serverTimestamp(), updatedBy: userName });
+      tx.set(doc(collection(db, "transactions")), {
+        voucherNo, type,
+        itemId: u.ref.id, brand: u.item.brand, model: u.item.model,
+        description: u.item.description || "", category: u.item.category || "",
+        qty: u.qty, delta: sign * u.qty, balanceAfter: u.next,
+        projectId: header.projectId || "", projectNo: header.projectNo || "", projectName: header.projectName || "",
+        issuedTo: header.issuedTo || "", supplier: header.supplier || "", reference: header.reference || "",
+        remarks: header.remarks || "",
+        userId: state.user.uid, userName,
+        createdAt: serverTimestamp()
+      });
+    }
+    return { voucherNo, updates };
+  });
+}
+
+// Physical count correction (managers only)
+async function adjustStock(itemId, countedQty, reason) {
+  if (!navigator.onLine) throw new Error("No internet connection. Connect and try again.");
+  const itemRef = doc(db, "items", itemId);
+  const counterRef = doc(db, "counters", "ADJUST");
+  return runTransaction(db, async (tx) => {
+    const [counterSnap, snap] = await Promise.all([tx.get(counterRef), tx.get(itemRef)]);
+    if (!snap.exists()) throw new Error("This item no longer exists.");
+    const item = snap.data();
+    const current = Number(item.qty || 0);
+    const delta = countedQty - current;
+    if (delta === 0) throw new Error("The counted quantity matches the system quantity. Nothing to adjust.");
+    const seq = (counterSnap.exists() ? Number(counterSnap.data().seq || 0) : 0) + 1;
+    const voucherNo = VOUCHER_PREFIX.ADJUST + String(seq).padStart(6, "0");
+    const userName = state.profile.name || state.user.email;
+    tx.set(counterRef, { seq }, { merge: true });
+    tx.update(itemRef, { qty: countedQty, updatedAt: serverTimestamp(), updatedBy: userName });
+    tx.set(doc(collection(db, "transactions")), {
+      voucherNo, type: "ADJUST",
+      itemId, brand: item.brand, model: item.model, description: item.description || "", category: item.category || "",
+      qty: Math.abs(delta), delta, balanceAfter: countedQty,
+      projectId: "", projectNo: "", projectName: "", issuedTo: "", supplier: "", reference: "",
+      remarks: reason, userId: state.user.uid, userName, createdAt: serverTimestamp()
+    });
+    return voucherNo;
+  });
+}
+
+// ---------------------------------------------------------------------
+// Item picker (search box + qty + add) used on Stock out / Stock in
+// ---------------------------------------------------------------------
+function searchItems(text, max = 15) {
+  const tokens = text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return [];
+  const out = [];
+  for (const it of state.items.values()) {
+    const hay = `${it.brand} ${it.model} ${it.description || ""} ${it.category || ""} ${it.rating || ""}`.toLowerCase();
+    if (tokens.every((t) => hay.includes(t))) out.push(it);
+  }
+  out.sort((a, b) => itemLabel(a).localeCompare(itemLabel(b)));
+  return out.slice(0, max);
+}
+
+function createPicker(container, onAdd, { isOut = false, inList = () => 0 } = {}) {
+  container.innerHTML = `
+    <div class="picker-row">
+      <div class="picker">
+        <input type="text" class="picker-input" placeholder="Search by brand, model, description or rating" autocomplete="off" aria-label="Search component">
+        <div class="picker-list hidden" role="listbox"></div>
+      </div>
+      <input type="number" class="picker-qty" min="1" step="1" value="1" aria-label="Quantity">
+      <button type="button" class="btn picker-add">Add to list</button>
+    </div>`;
+  const input = container.querySelector(".picker-input");
+  const list = container.querySelector(".picker-list");
+  const qtyEl = container.querySelector(".picker-qty");
+  let results = [], hl = -1, selected = null;
+
+  const renderList = () => {
+    if (!results.length) {
+      list.innerHTML = input.value.trim() ? `<div class="picker-option muted">No matching component. Ask a manager to add it to the catalogue.</div>` : "";
+      list.classList.toggle("hidden", !input.value.trim());
+      return;
+    }
+    list.innerHTML = results.map((it, i) => `
+      <div class="picker-option ${i === hl ? "hl" : ""} ${isOut && Number(it.qty || 0) <= 0 ? "disabled" : ""}" data-i="${i}" role="option">
+        <div><div class="model">${esc(itemLabel(it))}</div><div class="desc">${esc([itemSub(it), it.rating].filter(Boolean).join(", "))}</div></div>
+        <div class="avail">${lamp(stockStatus(it))} ${isOut && Number(it.qty || 0) <= 0 ? "Out of stock" : fmtNum(it.qty) + " " + esc(it.unit || "pcs")}</div>
+      </div>`).join("");
+    list.classList.remove("hidden");
+  };
+  const choose = (it) => {
+    if (isOut && Number(it.qty || 0) <= 0) {
+      toast(`${itemLabel(it)} is out of stock and can’t be issued.`, true);
+      return;
+    }
+    selected = it;
+    input.value = itemLabel(it);
+    list.classList.add("hidden");
+    qtyEl.focus(); qtyEl.select();
+  };
+  const add = () => {
+    if (!selected) {
+      if (results.length === 1) selected = results[0];
+      else { toast("Select a component from the search list first.", true); input.focus(); return; }
+    }
+    const qty = Math.floor(Number(qtyEl.value));
+    if (!qty || qty < 1) { toast("Enter a quantity of 1 or more.", true); qtyEl.focus(); return; }
+    if (isOut) {
+      const live = state.items.get(selected.id) || selected;
+      const avail = Number(live.qty || 0) - inList(selected.id);
+      if (Number(live.qty || 0) <= 0) { toast(`${itemLabel(live)} is out of stock and can’t be issued.`, true); return; }
+      if (qty > avail) {
+        toast(avail > 0 ? `Only ${fmtNum(live.qty)} of ${itemLabel(live)} in stock${inList(selected.id) ? ` (${fmtNum(inList(selected.id))} already in the list)` : ""}.` : `All available ${itemLabel(live)} are already in the list.`, true);
+        qtyEl.focus(); qtyEl.select(); return;
+      }
+    }
+    onAdd(selected, qty);
+    selected = null; input.value = ""; qtyEl.value = 1; results = []; renderList();
+    input.focus();
+  };
+
+  input.addEventListener("input", () => { selected = null; results = searchItems(input.value); hl = results.length ? 0 : -1; renderList(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); hl = Math.min(hl + 1, results.length - 1); renderList(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); hl = Math.max(hl - 1, 0); renderList(); }
+    else if (e.key === "Enter") { e.preventDefault(); if (results[hl]) choose(results[hl]); }
+    else if (e.key === "Escape") list.classList.add("hidden");
+  });
+  input.addEventListener("blur", () => setTimeout(() => list.classList.add("hidden"), 150));
+  list.addEventListener("mousedown", (e) => {
+    const opt = e.target.closest("[data-i]");
+    if (opt) { e.preventDefault(); choose(results[Number(opt.dataset.i)]); }
+  });
+  qtyEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+  container.querySelector(".picker-add").addEventListener("click", add);
+}
+
+// ---------------------------------------------------------------------
+// Movement form (shared by Stock out and Stock in)
+// ---------------------------------------------------------------------
+function createMovementForm({ prefix, isOut }) {
+  const lines = new Map(); // itemId -> qty
+  const table = $(`#${prefix}-lines`);
+
+  createPicker($(`#${prefix}-picker`), (item, qty) => {
+    lines.set(item.id, (lines.get(item.id) || 0) + qty);
+    render();
+  }, { isOut, inList: (id) => lines.get(id) || 0 });
+
+  function render() {
+    if (!lines.size) {
+      table.innerHTML = `<tbody>${emptyRow(6, "Search for a component above and add it to the list.")}</tbody>`;
+      return;
+    }
+    let total = 0;
+    const rows = [...lines.entries()].map(([id, qty]) => {
+      const it = state.items.get(id);
+      if (!it) return "";
+      total += qty;
+      const short = isOut && qty > Number(it.qty || 0);
+      return `<tr class="${short ? "short" : ""}" data-id="${esc(id)}">
+        <td><div class="model">${esc(itemLabel(it))}</div><div class="desc">${esc([itemSub(it), it.rating].filter(Boolean).join(", "))}</div>
+          ${short ? `<div class="short-note">Only ${fmtNum(it.qty)} in stock</div>` : ""}</td>
+        <td>${esc(it.category || "")}</td>
+        <td>${esc(it.location || "")}</td>
+        <td class="num nowrap">${lamp(stockStatus(it))} ${fmtNum(it.qty)}</td>
+        <td class="num"><input type="number" min="1" step="1" value="${qty}" data-qty aria-label="Quantity"></td>
+        <td class="num"><button class="btn btn-small btn-danger" data-remove type="button">Remove</button></td>
+      </tr>`;
+    }).join("");
+    table.innerHTML = `<thead><tr><th>Component</th><th>Category</th><th>Location</th><th class="num">In stock</th><th class="num">Qty</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="4" class="num"><strong>Total units</strong></td><td class="num"><strong>${fmtNum(total)}</strong></td><td></td></tr></tfoot>`;
+  }
+
+  table.addEventListener("click", (e) => {
+    if (e.target.matches("[data-remove]")) { lines.delete(e.target.closest("tr").dataset.id); render(); }
+  });
+  table.addEventListener("change", (e) => {
+    if (e.target.matches("[data-qty]")) {
+      const id = e.target.closest("tr").dataset.id;
+      let q = Math.floor(Number(e.target.value));
+      const it = state.items.get(id);
+      if (isOut && it && q > Number(it.qty || 0)) {
+        q = Number(it.qty || 0);
+        toast(`Only ${fmtNum(q)} of ${itemLabel(it)} in stock. Quantity set to ${fmtNum(q)}.`, true);
+      }
+      if (q >= 1) lines.set(id, q); else lines.delete(id);
+      render();
+    }
+  });
+
+  render();
+  return {
+    render,
+    lines,
+    clear() { lines.clear(); render(); }
+  };
+}
+
+const outForm = createMovementForm({ prefix: "out", isOut: true });
+const inForm = createMovementForm({ prefix: "in", isOut: false });
+
+// Stock out submit
+$("#out-clear").addEventListener("click", () => outForm.clear());
+$("#out-submit").addEventListener("click", async (e) => {
+  const projectId = $("#out-project").value;
+  const project = state.projects.get(projectId);
+  const issuedTo = $("#out-issued-to").value.trim();
+  if (!project) return toast("Select the project this material is for.", true);
+  if (!issuedTo) return toast("Enter the name of the person receiving the material.", true);
+  if (!outForm.lines.size) return toast("Add at least one component to the list.", true);
+  const lines = [...outForm.lines.entries()].map(([itemId, qty]) => ({ itemId, qty }));
+  e.target.disabled = true;
+  try {
+    const header = { projectId, projectNo: project.projectNo, projectName: project.name, issuedTo, remarks: $("#out-remarks").value.trim() };
+    showBusy(`Issuing ${lines.length} component${lines.length > 1 ? "s" : ""}…`);
+    const res = await commitMovement("OUT", header, lines);
+    hideBusy();
+    showVoucher("OUT", res.voucherNo, header, res.updates);
+    outForm.clear();
+    $("#out-issued-to").value = ""; $("#out-remarks").value = "";
+  } catch (err) {
+    toast(err.message, true);
+  } finally { hideBusy(); e.target.disabled = false; }
+});
+
+// Stock in submit
+$("#in-source").addEventListener("change", () => {
+  const isReturn = $("#in-source").value === "RETURN";
+  $("#in-supplier-wrap").classList.toggle("hidden", isReturn);
+  $("#in-project-wrap").classList.toggle("hidden", !isReturn);
+});
+$("#in-clear").addEventListener("click", () => inForm.clear());
+$("#in-submit").addEventListener("click", async (e) => {
+  const type = $("#in-source").value;
+  const header = { reference: $("#in-reference").value.trim(), remarks: $("#in-remarks").value.trim() };
+  if (type === "RETURN") {
+    const project = state.projects.get($("#in-project").value);
+    if (!project) return toast("Select the project the material is coming back from.", true);
+    Object.assign(header, { projectId: project.id, projectNo: project.projectNo, projectName: project.name });
+  } else {
+    header.supplier = $("#in-supplier").value.trim(); // optional
+  }
+  if (!inForm.lines.size) return toast("Add at least one component to the list.", true);
+  const lines = [...inForm.lines.entries()].map(([itemId, qty]) => ({ itemId, qty }));
+  e.target.disabled = true;
+  try {
+    showBusy(`Receiving ${lines.length} component${lines.length > 1 ? "s" : ""}…`);
+    const res = await commitMovement(type, header, lines);
+    hideBusy();
+    showVoucher(type, res.voucherNo, header, res.updates);
+    inForm.clear();
+    ["#in-reference", "#in-remarks"].forEach((s) => ($(s).value = ""));
+  } catch (err) {
+    toast(err.message, true);
+  } finally { hideBusy(); e.target.disabled = false; }
+});
+
+// Voucher confirmation + printable slip
+function showVoucher(type, voucherNo, header, updates) {
+  const rows = updates.map((u) => `<tr><td>${esc(itemLabel(u.item))}</td><td class="num">${fmtNum(u.qty)}</td><td class="num">${fmtNum(u.next)}</td></tr>`).join("");
+  const { close } = openModal({
+    title: `${TYPE_LABEL[type]} saved: ${voucherNo}`,
+    body: `
+      ${header.projectNo ? `<p><strong>Project:</strong> ${esc(header.projectNo)}, ${esc(header.projectName)}</p>` : ""}
+      ${header.issuedTo ? `<p><strong>Issued to:</strong> ${esc(header.issuedTo)}</p>` : ""}
+      ${header.supplier ? `<p><strong>Supplier:</strong> ${esc(header.supplier)}</p>` : ""}
+      <div class="table-wrap"><table><thead><tr><th>Component</th><th class="num">Qty</th><th class="num">New balance</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <button class="btn" type="button" id="print-voucher">Print slip</button>`,
+    hideCancel: false, cancelLabel: "Done"
+  });
+  $("#print-voucher").addEventListener("click", () => printVoucher(type, voucherNo, header, updates));
+}
+
+function printVoucher(type, voucherNo, header, updates) {
+  const w = window.open("", "_blank", "width=800,height=900");
+  if (!w) return toast("Allow pop-ups for this site to print slips.", true);
+  const rows = updates.map((u, i) => `<tr><td>${i + 1}</td><td>${esc(u.item.brand)}</td><td>${esc(u.item.model)}</td><td>${esc(u.item.description || "")}</td><td style="text-align:right">${fmtNum(u.qty)}</td></tr>`).join("");
+  w.document.write(`<!DOCTYPE html><html><head><title>${voucherNo}</title>
+    <style>body{font-family:Arial,sans-serif;padding:24px;color:#000}h1{margin:0;font-size:20px}h2{margin:4px 0 16px;font-size:16px}
+    table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #444;padding:6px 8px;font-size:13px;text-align:left}
+    .meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:14px}.sign{display:flex;justify-content:space-between;margin-top:60px}
+    .sign div{border-top:1px solid #000;width:200px;text-align:center;padding-top:4px;font-size:13px}</style></head><body>
+    <h1>${esc(company.name)}</h1><div style="font-size:13px">${esc(company.address)}</div>
+    <h2>${type === "OUT" ? "Material issue slip" : type === "RETURN" ? "Material return note" : "Goods received note"}</h2>
+    <div class="meta">
+      <div><strong>Voucher:</strong> ${esc(voucherNo)}</div><div><strong>Date:</strong> ${fmtDateTime(new Date())}</div>
+      ${header.projectNo ? `<div><strong>Project:</strong> ${esc(header.projectNo)}, ${esc(header.projectName)}</div>` : ""}
+      ${header.issuedTo ? `<div><strong>Issued to:</strong> ${esc(header.issuedTo)}</div>` : ""}
+      ${header.supplier ? `<div><strong>Supplier:</strong> ${esc(header.supplier)}</div>` : ""}
+      ${header.reference ? `<div><strong>Reference:</strong> ${esc(header.reference)}</div>` : ""}
+      ${header.remarks ? `<div><strong>Remarks:</strong> ${esc(header.remarks)}</div>` : ""}
+      <div><strong>Entered by:</strong> ${esc(state.profile.name || state.user.email)}</div>
+    </div>
+    <table><thead><tr><th>#</th><th>Brand</th><th>Model</th><th>Description</th><th style="text-align:right">Qty</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="sign"><div>Store keeper</div><div>${type === "OUT" ? "Received by" : "Checked by"}</div><div>Approved by</div></div>
+    <script>window.onload=()=>window.print()<\/script></body></html>`);
+  w.document.close();
+}
+
+// ---------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------
+function fillProjectSelects() {
+  const open = [...state.projects.values()].filter((p) => p.status !== "Closed")
+    .sort((a, b) => String(b.projectNo).localeCompare(String(a.projectNo)));
+  const all = [...state.projects.values()].sort((a, b) => String(b.projectNo).localeCompare(String(a.projectNo)));
+  const opts = (list) => `<option value="">Select a project</option>` +
+    list.map((p) => `<option value="${esc(p.id)}">${esc(p.projectNo)}, ${esc(p.name)}${p.client ? " (" + esc(p.client) + ")" : ""}</option>`).join("");
+  const keepOut = $("#out-project").value, keepIn = $("#in-project").value;
+  $("#out-project").innerHTML = opts(open);
+  $("#in-project").innerHTML = opts(all);
+  $("#out-project").value = keepOut; $("#in-project").value = keepIn;
+}
+
+function projectModal(existing) {
+  if (existing && !isManager()) return toast("You do not have permission to edit projects.", true);
+  openModal({
+    title: existing ? "Edit project" : "New project",
+    body: `
+      <label>Project / job number <input id="pm-no" value="${esc(existing?.projectNo || "")}" placeholder="e.g. JOB-2026-114" ${existing ? "" : "required"}></label>
+      <label>Project name <input id="pm-name" value="${esc(existing?.name || "")}" placeholder="e.g. LT panel, 1600A, Block C"></label>
+      <label>Client <input id="pm-client" value="${esc(existing?.client || "")}"></label>
+      ${existing ? `<label>Status <select id="pm-status"><option ${existing.status !== "Closed" ? "selected" : ""}>Open</option><option ${existing.status === "Closed" ? "selected" : ""}>Closed</option></select></label>` : ""}`,
+    submitLabel: existing ? "Save changes" : "Create project",
+    onSubmit: async (m) => {
+      const projectNo = m.querySelector("#pm-no").value.trim();
+      const name = m.querySelector("#pm-name").value.trim();
+      const client = m.querySelector("#pm-client").value.trim();
+      if (!projectNo || !name) { toast("Enter a project number and name.", true); return true; }
+      if (existing) {
+        await updateDoc(doc(db, "projects", existing.id), { projectNo, name, client, status: m.querySelector("#pm-status").value });
+        toast("Project updated");
+      } else {
+        const dup = [...state.projects.values()].find((p) => String(p.projectNo).toLowerCase() === projectNo.toLowerCase());
+        if (dup) { toast(`Project number ${projectNo} already exists.`, true); return true; }
+        const ref = await addDoc(collection(db, "projects"), { projectNo, name, client, status: "Open", createdAt: serverTimestamp(), createdBy: state.profile.name || state.user.email });
+        toast("Project created");
+        // Pre-select it on the stock out form
+        setTimeout(() => { $("#out-project").value = ref.id; }, 300);
+      }
+    }
+  });
+}
+$("#out-new-project").addEventListener("click", () => projectModal());
+$("#proj-add").addEventListener("click", () => projectModal());
+
+function renderProjects() {
+  const q = $("#proj-search").value.trim().toLowerCase();
+  const status = $("#proj-status").value;
+  const list = [...state.projects.values()]
+    .filter((p) => !status || (p.status || "Open") === status)
+    .filter((p) => !q || `${p.projectNo} ${p.name} ${p.client}`.toLowerCase().includes(q))
+    .sort((a, b) => String(b.projectNo).localeCompare(String(a.projectNo)));
+  const table = $("#proj-table");
+  table.innerHTML = `<thead><tr><th>Project no.</th><th>Name</th><th>Client</th><th>Status</th><th>Created</th><th></th></tr></thead>
+    <tbody>${list.length ? list.map((p) => `<tr>
+      <td>${esc(p.projectNo)}</td>
+      <td>${esc(p.name)}</td><td>${esc(p.client || "")}</td><td>${esc(p.status || "Open")}</td>
+      <td class="nowrap">${fmtDateTime(p.createdAt)}</td>
+      <td class="row-actions">${isManager() ? `<button class="btn btn-small" data-edit="${esc(p.id)}">Edit</button>` : ""}</td>
+    </tr>`).join("") : emptyRow(6, "No projects match. Create a project to start issuing stock to it.")}</tbody>`;
+}
+$("#proj-search").addEventListener("input", renderProjects);
+$("#proj-status").addEventListener("change", renderProjects);
+
+// ---------------------------------------------------------------------
+// Inventory
+// ---------------------------------------------------------------------
+function refreshFilterOptions() {
+  const brands = [...new Set([...state.items.values()].map((i) => i.brand).filter(Boolean))].sort();
+  const cats = [...new Set([...state.items.values()].map((i) => i.category).filter(Boolean))].sort();
+  const fill = (sel, list, allLabel) => {
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">${allLabel}</option>` + list.map((v) => `<option>${esc(v)}</option>`).join("");
+    sel.value = list.includes(keep) ? keep : "";
+  };
+  fill($("#inv-brand"), brands, "All brands");
+  fill($("#inv-category"), cats, "All categories");
+}
+
+function filteredItems() {
+  const q = $("#inv-search").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const brand = $("#inv-brand").value, cat = $("#inv-category").value, lowOnly = $("#inv-low").checked;
+  return [...state.items.values()]
+    .filter((i) => !brand || i.brand === brand)
+    .filter((i) => !cat || i.category === cat)
+    .filter((i) => !lowOnly || stockStatus(i) !== "ok")
+    .filter((i) => {
+      if (!q.length) return true;
+      const hay = `${i.brand} ${i.model} ${i.description || ""} ${i.category || ""} ${i.rating || ""} ${i.location || ""}`.toLowerCase();
+      return q.every((t) => hay.includes(t));
+    })
+    .sort((a, b) => itemLabel(a).localeCompare(itemLabel(b)));
+}
+
+function renderInventory() {
+  const list = filteredItems();
+  $("#inv-count").textContent = `${fmtNum(list.length)} of ${fmtNum(state.items.size)} items`;
+  const mgr = isManager();
+  $("#inv-table").innerHTML = `<thead><tr><th></th><th>Description</th><th class="num">In stock</th>${mgr ? "<th></th>" : ""}</tr></thead>
+    <tbody>${list.length ? list.map((i) => `<tr>
+      <td>${lamp(stockStatus(i))}</td>
+      <td>${esc(i.description || itemLabel(i))}</td>
+      <td class="num"><strong>${fmtNum(i.qty)}</strong> ${esc(i.unit || "pcs")}</td>
+      ${mgr ? `<td class="row-actions"><button class="btn btn-small" data-edit="${esc(i.id)}">Edit</button><button class="btn btn-small" data-adjust="${esc(i.id)}">Adjust count</button></td>` : ""}
+    </tr>`).join("") : emptyRow(mgr ? 4 : 3, state.items.size ? "No items match these filters." : "The catalogue is empty. Add items one by one, or import your current Excel sheet.")}</tbody>`;
+}
+["#inv-search", "#inv-brand", "#inv-category", "#inv-low"].forEach((s) => $(s).addEventListener(s === "#inv-search" ? "input" : "change", renderInventory));
+
+$("#inv-table").addEventListener("click", (e) => {
+  const ed = e.target.closest("[data-edit]"), ad = e.target.closest("[data-adjust]");
+  if (ed) itemModal(state.items.get(ed.dataset.edit));
+  if (ad) adjustModal(state.items.get(ad.dataset.adjust));
+});
+$("#inv-add").addEventListener("click", () => itemModal());
+
+function datalistOptions(values) { return values.map((v) => `<option value="${esc(v)}">`).join(""); }
+
+function itemModal(existing) {
+  if (!isManager()) return toast("You do not have permission to add or edit items.", true);
+  const brands = [...new Set([...DEFAULT_BRANDS, ...[...state.items.values()].map((i) => i.brand)])].sort();
+  const cats = [...new Set([...DEFAULT_CATEGORIES, ...[...state.items.values()].map((i) => i.category).filter(Boolean)])];
+  openModal({
+    title: existing ? `Edit ${itemLabel(existing)}` : "Add item",
+    body: `
+      ${existing ? "" : `<div class="form-grid">
+        <label class="span-2">Description <input id="im-desc" placeholder="e.g. Tmax XT2 MCCB, thermal-magnetic" autocomplete="off"></label>
+        <label>Quantity <input id="im-qty" type="number" min="0" step="1" value="0"></label>
+      </div>`}
+      ${existing ? `<div class="form-grid">
+        <label>Brand <input id="im-brand" list="im-brands" value="${esc(existing?.brand || "")}" ${existing ? "disabled" : ""}></label>
+        <label>Model / part number <input id="im-model" value="${esc(existing?.model || "")}" ${existing ? "disabled" : ""}></label>
+        <label class="span-2">Description <input id="im-desc" value="${esc(existing?.description || "")}" placeholder="e.g. Tmax XT2 MCCB, thermal-magnetic"></label>
+        <label>Category <input id="im-cat" list="im-cats" value="${esc(existing?.category || "")}"></label>
+        <label>Rating <input id="im-rating" value="${esc(existing?.rating || "")}" placeholder="e.g. 250A 3P 36kA"></label>
+        <label>Storage location <input id="im-loc" value="${esc(existing?.location || "")}" placeholder="e.g. Rack B-3"></label>
+        <label>Unit <input id="im-unit" value="${esc(existing?.unit || "pcs")}"></label>
+        <label>Minimum stock level <input id="im-min" type="number" min="0" step="1" value="${esc(existing?.minQty ?? 0)}"></label>
+      </div>` : ""}
+      ${existing ? `<p class="muted small">Brand and model can’t be changed because past movements refer to them. To change stock, use “Adjust count”.</p>` : ""}
+      ${existing && Number(existing.qty) === 0 ? `<button class="btn btn-danger" type="button" id="im-delete">Delete this item</button>` : ""}
+      <datalist id="im-brands">${datalistOptions(brands)}</datalist>
+      <datalist id="im-cats">${datalistOptions(cats)}</datalist>`,
+    submitLabel: existing ? "Save changes" : "Add item",
+    onSubmit: async (m) => {
+      const v = (id) => m.querySelector(id).value.trim();
+      const userName = state.profile.name || state.user.email;
+      if (!existing) {
+        const description = v("#im-desc");
+        if (!description) { toast("Enter a description.", true); return true; }
+        const dup = [...state.items.values()].some((i) => (i.description || "").trim().toLowerCase() === description.toLowerCase() && !i.brand && !i.model);
+        if (dup) { toast(`“${description}” is already in the catalogue.`, true); return true; }
+        const qty = Math.max(0, Math.floor(Number(v("#im-qty")) || 0));
+        const ref = doc(collection(db, "items"));
+        const fields = { brand: "", model: "", description, category: "", rating: "", location: "", unit: "pcs", minQty: 0 };
+        const batch = writeBatch(db);
+        batch.set(ref, { ...fields, qty, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: userName });
+        if (qty > 0) batch.set(doc(collection(db, "transactions")), openingTx(ref.id, fields, qty));
+        await batch.commit();
+        toast(`${description} added`);
+        return;
+      }
+      const fields = {
+        description: v("#im-desc"), category: v("#im-cat"), rating: v("#im-rating"),
+        location: v("#im-loc"), unit: v("#im-unit") || "pcs",
+        minQty: Math.max(0, Math.floor(Number(v("#im-min")) || 0))
+      };
+      await updateDoc(doc(db, "items", existing.id), { ...fields, updatedAt: serverTimestamp(), updatedBy: userName });
+      toast("Item updated");
+    }
+  });
+  const del = $("#im-delete");
+  if (del) del.addEventListener("click", async () => {
+    if (!confirm(`Delete ${itemLabel(existing)} from the catalogue? Its history stays in the records.`)) return;
+    await deleteDoc(doc(db, "items", existing.id));
+    $("#modal-root").innerHTML = "";
+    toast("Item deleted");
+  });
+}
+
+function openingTx(itemId, item, qty) {
+  return {
+    voucherNo: "OPENING", type: "OPENING", itemId, brand: item.brand, model: item.model,
+    description: item.description || "", category: item.category || "",
+    qty, delta: qty, balanceAfter: qty,
+    projectId: "", projectNo: "", projectName: "", issuedTo: "", supplier: "", reference: "",
+    remarks: "Opening stock", userId: state.user.uid, userName: state.profile.name || state.user.email,
+    createdAt: serverTimestamp()
+  };
+}
+
+function adjustModal(item) {
+  if (!isManager()) return toast("You do not have permission to adjust stock counts.", true);
+  openModal({
+    title: `Adjust count: ${itemLabel(item)}`,
+    body: `
+      <p>System quantity: <strong>${fmtNum(item.qty)} ${esc(item.unit || "pcs")}</strong></p>
+      <label>Physically counted quantity <input id="ad-qty" type="number" min="0" step="1" value="${esc(item.qty)}"></label>
+      <label>Reason <input id="ad-reason" placeholder="e.g. Stock count 30 Oct, 2 damaged units"></label>`,
+    submitLabel: "Save adjustment",
+    onSubmit: async (m) => {
+      const counted = Math.floor(Number(m.querySelector("#ad-qty").value));
+      const reason = m.querySelector("#ad-reason").value.trim();
+      if (!(counted >= 0)) { toast("Enter a quantity of 0 or more.", true); return true; }
+      if (!reason) { toast("Enter a reason for the adjustment.", true); return true; }
+      const v = await adjustStock(item.id, counted, reason);
+      toast(`Adjustment saved: ${v}`);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------
+// Excel import / export
+// ---------------------------------------------------------------------
+function exportSheets(filename, sheets) {
+  if (typeof XLSX === "undefined") return toast("Excel library didn’t load. Check your internet connection.", true);
+  const wb = XLSX.utils.book_new();
+  for (const [name, rows] of Object.entries(sheets)) {
+    const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ "": "No data" }]);
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  }
+  XLSX.writeFile(wb, filename);
+}
+
+$("#inv-export").addEventListener("click", () => {
+  const rows = filteredItems().map((i) => ({
+    Brand: i.brand, Model: i.model, Description: i.description, Category: i.category, Rating: i.rating,
+    Location: i.location, Unit: i.unit, "In stock": Number(i.qty || 0), Minimum: Number(i.minQty || 0),
+    Status: { ok: "In stock", low: "Low", out: "Out of stock" }[stockStatus(i)]
+  }));
+  exportSheets(`Inventory ${isoDate(new Date())}.xlsx`, { Inventory: rows });
+});
+
+$("#inv-template").addEventListener("click", () => {
+  exportSheets("Inventory import template.xlsx", {
+    Items: [
+      { Brand: "ABB", Model: "1SDA067413R1", Description: "Tmax XT2N 160 MCCB", Category: "MCCB", Rating: "160A 3P 36kA", Location: "Rack A-1", Unit: "pcs", Qty: 10, MinQty: 4 },
+      { Brand: "Schneider Electric", Model: "LV431630", Description: "Compact NSX250F MCCB", Category: "MCCB", Rating: "250A 3P 36kA", Location: "Rack A-2", Unit: "pcs", Qty: 6, MinQty: 2 },
+      { Brand: "Siemens", Model: "3RT2026-1AP00", Description: "Contactor 25A, 230V AC coil", Category: "Contactor", Rating: "25A AC-3", Location: "Rack C-4", Unit: "pcs", Qty: 20, MinQty: 8 }
+    ]
+  });
+});
+
+$("#inv-import").addEventListener("click", () => $("#inv-import-file").click());
+$("#inv-import-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  if (typeof XLSX === "undefined") return toast("Excel library didn’t load. Check your internet connection.", true);
+  try {
+    const wb = XLSX.read(await file.arrayBuffer());
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+    // Accept flexible column names
+    const pick = (row, names) => {
+      for (const k of Object.keys(row)) {
+        const norm = k.toLowerCase().replace(/[^a-z]/g, "");
+        if (names.includes(norm)) return String(row[k]).trim();
+      }
+      return "";
+    };
+    const parsed = raw.map((r) => ({
+      brand: pick(r, ["brand", "make", "vendor", "manufacturer"]),
+      model: pick(r, ["model", "modelno", "partno", "partnumber", "catalogueno", "catalogno", "catno", "code"]),
+      description: pick(r, ["description", "desc", "itemdescription"]),
+      category: pick(r, ["category", "type", "itemtype"]),
+      rating: pick(r, ["rating", "ratings", "spec", "specification"]),
+      location: pick(r, ["location", "bin", "rack", "shelf"]),
+      unit: pick(r, ["unit", "uom"]) || "pcs",
+      qty: Math.max(0, Math.floor(Number(pick(r, ["qty", "quantity", "stock", "instock", "balance"])) || 0)),
+      minQty: Math.max(0, Math.floor(Number(pick(r, ["minqty", "minimum", "min", "minstock", "reorderlevel"])) || 0))
+    })).filter((r) => r.brand && r.model);
+
+    if (!parsed.length) return toast("No rows found. The sheet needs at least Brand and Model columns. Download the template to see the format.", true);
+
+    // Merge duplicate rows in the file
+    const byId = new Map();
+    parsed.forEach((r) => {
+      const id = makeItemId(r.brand, r.model);
+      if (byId.has(id)) byId.get(id).qty += r.qty; else byId.set(id, { ...r, id });
+    });
+    const rows = [...byId.values()];
+    const newRows = rows.filter((r) => !state.items.has(r.id));
+    const existingRows = rows.filter((r) => state.items.has(r.id));
+
+    openModal({
+      title: "Import items",
+      body: `<p>Found <strong>${rows.length}</strong> items in <em>${esc(file.name)}</em>.</p>
+        <p><strong>${newRows.length}</strong> new items will be added with their quantity as opening stock.</p>
+        <p><strong>${existingRows.length}</strong> items already exist. Their details (description, category, rating, location, minimum) will be updated, but their stock quantity will not change. Use “Adjust count” for that.</p>`,
+      submitLabel: "Import",
+      onSubmit: async () => {
+        const userName = state.profile.name || state.user.email;
+        const ops = [];
+        newRows.forEach((r) => {
+          const { id, qty, ...f } = r;
+          ops.push(["set", doc(db, "items", id), { ...f, qty, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: userName }]);
+          if (qty > 0) ops.push(["set", doc(collection(db, "transactions")), openingTx(id, r, qty)]);
+        });
+        existingRows.forEach((r) => {
+          ops.push(["update", doc(db, "items", r.id), {
+            description: r.description, category: r.category, rating: r.rating, location: r.location,
+            unit: r.unit, minQty: r.minQty, updatedAt: serverTimestamp(), updatedBy: userName
+          }]);
+        });
+        // Firestore batches allow max 500 writes
+        for (let i = 0; i < ops.length; i += 450) {
+          const batch = writeBatch(db);
+          ops.slice(i, i + 450).forEach(([op, ref, data]) => op === "set" ? batch.set(ref, data) : batch.update(ref, data));
+          await batch.commit();
+        }
+        toast(`Import finished: ${newRows.length} added, ${existingRows.length} updated`);
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    toast("Couldn’t read that file: " + err.message, true);
+  }
+});
+
+// ---------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------
+if (getUserName()) boot(getUserName());
+else askName(boot);
+
+</script>
+</body>
+</html>
