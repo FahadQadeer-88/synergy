@@ -325,6 +325,9 @@ tr.short td { background: rgba(210,59,47,.08); }
 .dc-bar h3 { margin: 0 auto 0 0; font-size: 20px; }
 .dc-fit { overflow: hidden; }
 .dc-items input.q { text-align: right; }
+.dc-items input.d { margin-top: 4px; font-size: 13px; min-height: 32px; padding: 4px 8px; }
+.dc-items .ctag { display: inline-block; margin-top: 4px; }
+.dc-add { display: flex; flex-wrap: wrap; gap: 8px; }
 .dc-items td { padding: 4px 6px; }
 .dc-total { text-align: right; font-weight: 700; margin: 10px 0 14px; font-size: 16px; }
 @media (max-width: 1000px) { .dc-layout { grid-template-columns: 1fr; } .dc-hist { position: static; max-height: 340px; } }
@@ -536,6 +539,7 @@ tr.short td { background: rgba(210,59,47,.08); }
           <div class="dc-right" id="dc-right"></div>
         </div>
         <datalist id="dc-item-list"></datalist>
+        <datalist id="dc-custom-list"></datalist>
       </section>
 
     </main>
@@ -1974,6 +1978,7 @@ const DC_CSS = `
 .dcp .sig span{display:block;font-weight:400;min-height:16px;margin-top:-20px;margin-bottom:4px}
 .dcp .foot{margin-top:14px;border-top:1px solid #999;padding-top:6px;text-align:center;font-size:11px;color:#444}
 .dcp tr{page-break-inside:avoid}
+.dcp .sub{font-size:11px;color:#333;white-space:pre-wrap;margin-top:2px}
 `;
 document.head.appendChild(Object.assign(document.createElement("style"), { textContent: DC_CSS }));
 
@@ -1996,12 +2001,12 @@ function dcNextNo() {
 }
 function dcBlank() {
   return { isEdit: false, dcNo: dcNextNo(), date: isoDate(new Date()), customer: "", address: "", reff: "", po: "", to: "", subject: "",
-    returnable: "No", copy: "Original", transport: "", prepared: state.profile?.name || "", verified: "", items: [{ n: "", q: "" }] };
+    returnable: "No", copy: "Original", transport: "", prepared: state.profile?.name || "", verified: "", items: [{ n: "", q: "", d: "", c: false }] };
 }
 
 // The printable sheet (used for the on-screen preview and for the PDF)
 function dcSheet(d) {
-  const rows = d.items.map((i, k) => `<tr><td class="c">${k + 1}</td><td>${esc(i.n)}</td><td class="q">${esc(i.q)}</td></tr>`).join("");
+  const rows = d.items.map((i, k) => `<tr><td class="c">${k + 1}</td><td>${esc(i.n)}${i.d ? `<div class="sub">${esc(i.d)}</div>` : ""}</td><td class="q">${esc(i.q)}</td></tr>`).join("");
   const pad = '<tr class="fill"><td></td><td></td><td></td></tr>'.repeat(Math.max(0, 12 - d.items.length));
   return `<div class="dcp">
   <div class="hd"><img src="${DC_LOGO}" alt="Synergy"><div class="ct"><b>Our Location</b><br>${esc(DC_CO.loc)}<br><b>Email</b><br>${esc(DC_CO.mail)}</div></div>
@@ -2039,17 +2044,21 @@ function dcPrint(d) {
   }, 400);
 }
 
-function renderDC() {
+function renderDC(force = false) {
   // inventory names as suggestions for the product field
   $("#dc-item-list").innerHTML = [...state.items.values()].slice(0, 2000)
     .map((it) => `<option value="${esc([itemLabel(it), it.description && (it.brand || it.model) ? it.description : ""].filter(Boolean).join(" – "))}">`).join("");
+  const custom = new Set();
+  DC.rows.forEach((d) => (d.items || []).forEach((i) => { if (i.c && i.n) custom.add(i.n); }));
+  $("#dc-custom-list").innerHTML = [...custom].sort().map((n) => `<option value="${esc(n)}">`).join("");
   renderDCList();
-  if (!DC.draft) renderDCRight();   // don't wipe a form that is being filled in
+  // Live database updates must not wipe a form that is being filled in; button clicks pass force = true
+  if (force || !DC.draft) renderDCRight();
 }
 function renderDCList() {
   const q = $("#dc-search").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const rows = DC.rows.filter((d) => !q.length || q.every((w) =>
-    `${d.dcNo} ${d.customer} ${d.subject} ${d.po} ${d.reff} ${dcDate(d.date)} ${(d.items || []).map((i) => i.n).join(" ")}`.toLowerCase().includes(w)));
+    `${d.dcNo} ${d.customer} ${d.subject} ${d.po} ${d.reff} ${dcDate(d.date)} ${(d.items || []).map((i) => i.n + " " + (i.d || "")).join(" ")}`.toLowerCase().includes(w)));
   $("#dc-count").textContent = `${rows.length} challan${rows.length === 1 ? "" : "s"}`;
   $("#dc-list").innerHTML = rows.length ? rows.map((d) => `
     <div class="dc-item${DC.sel === d.id && !DC.draft ? " on" : ""}" data-act="view" data-id="${esc(d.id)}">
@@ -2096,7 +2105,10 @@ function dcForm() {
   <div class="panel" style="margin-top:14px">
     <h3>Items</h3>
     <div class="table-wrap"><table class="dc-items"><thead><tr><th style="width:44px">#</th><th>Product name</th><th style="width:110px" class="num">Qty</th><th style="width:44px"></th></tr></thead><tbody id="dc-rows"></tbody></table></div>
-    <button class="btn btn-small" type="button" data-act="addrow">+ Add item</button>
+    <div class="dc-add">
+      <button class="btn btn-small" type="button" data-act="addrow">+ Add inventory item</button>
+      <button class="btn btn-small" type="button" data-act="addcustom">+ Add custom item (panel / DB / service)</button>
+    </div>
     <div class="dc-total">TOTAL: <span id="dc-tq"></span></div>
     <div class="form-grid">
       <label class="span-2">Transportation details<textarea rows="2" data-dc="transport">${esc(e.transport)}</textarea></label>
@@ -2113,7 +2125,9 @@ function dcForm() {
 function dcRows() {
   $("#dc-rows").innerHTML = DC.draft.items.map((i, k) => `<tr>
     <td>${k + 1}</td>
-    <td><input data-i="${k}" data-k="n" list="dc-item-list" value="${esc(i.n)}" placeholder="Product name"></td>
+    <td><input data-i="${k}" data-k="n" list="${i.c ? "dc-custom-list" : "dc-item-list"}" value="${esc(i.n)}" placeholder="${i.c ? "Custom item, e.g. 400A Main LV Panel, Distribution Box, Installation service" : "Search inventory item or type a name"}">
+      <input class="d" data-i="${k}" data-k="d" value="${esc(i.d || "")}" placeholder="Details / specification (optional)">
+      ${i.c ? '<span class="tag ctag">Custom item</span>' : ""}</td>
     <td><input class="q" type="number" min="0" step="any" data-i="${k}" data-k="q" value="${esc(i.q)}"></td>
     <td><button class="btn btn-small" type="button" data-act="rmrow" data-i="${k}" aria-label="Remove item">✕</button></td></tr>`).join("");
   dcTq();
@@ -2122,7 +2136,7 @@ const dcTq = () => { const el = $("#dc-tq"); if (el) el.textContent = fmtNum(dcT
 
 async function dcSave(thenPrint) {
   const e = DC.draft;
-  const items = e.items.filter((i) => String(i.n).trim() || String(i.q) !== "").map((i) => ({ n: String(i.n).trim(), q: Number(i.q) || 0 }));
+  const items = e.items.filter((i) => String(i.n).trim() || String(i.d || "").trim() || String(i.q) !== "").map((i) => ({ n: String(i.n).trim(), q: Number(i.q) || 0, d: String(i.d || "").trim(), c: !!i.c }));
   const dcNo = String(e.dcNo).trim();
   if (!dcNo) return toast("Enter the DC number.", true);
   if (!e.customer.trim()) return toast("Enter the customer (M/s).", true);
@@ -2143,7 +2157,7 @@ async function dcSave(thenPrint) {
     hideBusy();
     toast(`Delivery challan ${dcNo} saved.`);
     DC.sel = id; DC.draft = null;
-    renderDC();
+    renderDC(true);
     if (thenPrint) dcPrint({ ...data });
   } catch (err) {
     hideBusy(); console.error(err); toast(err.message || String(err), true);
@@ -2154,21 +2168,22 @@ $("#page-delivery-challan").addEventListener("click", async (ev) => {
   const el = ev.target.closest("[data-act]");
   if (!el) return;
   const act = el.dataset.act, cur = DC.rows.find((x) => x.id === DC.sel);
-  if (act === "new") { DC.draft = dcBlank(); DC.sel = null; renderDC(); }
-  else if (act === "view") { DC.draft = null; DC.sel = el.dataset.id; renderDC(); }
+  if (act === "new") { DC.draft = dcBlank(); DC.sel = null; renderDC(true); }
+  else if (act === "view") { DC.draft = null; DC.sel = el.dataset.id; renderDC(true); }
   else if (act === "print" && cur) dcPrint(cur);
-  else if (act === "edit" && cur) { DC.draft = { ...JSON.parse(JSON.stringify(cur)), isEdit: true }; renderDC(); }
+  else if (act === "edit" && cur) { DC.draft = { ...JSON.parse(JSON.stringify(cur)), isEdit: true }; renderDC(true); }
   else if (act === "dup" && cur) {
-    DC.draft = { ...JSON.parse(JSON.stringify(cur)), isEdit: false, dcNo: dcNextNo(), date: isoDate(new Date()), prepared: state.profile.name || cur.prepared }; DC.sel = null; renderDC();
+    DC.draft = { ...JSON.parse(JSON.stringify(cur)), isEdit: false, dcNo: dcNextNo(), date: isoDate(new Date()), prepared: state.profile.name || cur.prepared }; DC.sel = null; renderDC(true);
   }
   else if (act === "del" && cur) {
     if (!confirm(`Delete delivery challan ${cur.dcNo} permanently?`)) return;
-    try { showBusy("Deleting…"); await deleteDoc(doc(db, DC_COL, cur.id)); hideBusy(); DC.sel = null; toast("Delivery challan deleted."); renderDC(); }
+    try { showBusy("Deleting…"); await deleteDoc(doc(db, DC_COL, cur.id)); hideBusy(); DC.sel = null; toast("Delivery challan deleted."); renderDC(true); }
     catch (err) { hideBusy(); toast(err.message || String(err), true); }
   }
-  else if (act === "cancel") { DC.draft = null; renderDC(); }
-  else if (act === "addrow") { DC.draft.items.push({ n: "", q: "" }); dcRows(); }
-  else if (act === "rmrow") { DC.draft.items.splice(+el.dataset.i, 1); if (!DC.draft.items.length) DC.draft.items.push({ n: "", q: "" }); dcRows(); }
+  else if (act === "cancel") { DC.draft = null; renderDC(true); }
+  else if (act === "addrow") { DC.draft.items.push({ n: "", q: "", d: "", c: false }); dcRows(); }
+  else if (act === "addcustom") { DC.draft.items.push({ n: "", q: "", d: "", c: true }); dcRows(); }
+  else if (act === "rmrow") { DC.draft.items.splice(+el.dataset.i, 1); if (!DC.draft.items.length) DC.draft.items.push({ n: "", q: "", d: "", c: false }); dcRows(); }
   else if (act === "save") dcSave(false);
   else if (act === "saveprint") dcSave(true);
 });
