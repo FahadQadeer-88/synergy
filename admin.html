@@ -734,7 +734,7 @@ function stopListeners() {
 
 function startApp() {
   $("#user-name").textContent = state.profile.name || state.user.email;
-  $("#user-role").textContent = "Test mode, no sign-in";
+  $("#user-role").textContent = "";
   document.querySelectorAll("#nav a").forEach((a) => {
     a.classList.toggle("hidden", !a.dataset.roles.split(",").includes(role()));
   });
