@@ -2,8 +2,8 @@
 <!--
 =====================================================================
  SWITCHGEAR INVENTORY - OFFICE VERSION (restricted rights)
- Office can: view inventory + projects list, stock in, stock out.
- Office cannot: edit / adjust / delete, open project details, see dashboard or history.
+ Office can: view inventory + projects list, stock in, stock out, view history.
+ Office cannot: edit / adjust / delete, open project details, see dashboard.
  Firebase project: synergy-5b2d3
 
  Firestore rules in use for now (Firebase console → Firestore → Rules):
@@ -214,6 +214,7 @@ tr.short td { background: rgba(210,59,47,.08); }
 .tag-OUT { background: var(--accent-soft); border-color: transparent; }
 .tag-IN, .tag-RETURN { background: rgba(47,158,79,.14); border-color: transparent; }
 .tag-ADJUST, .tag-OPENING { background: rgba(227,164,23,.18); border-color: transparent; }
+.tag-CORRECT { background: rgba(31,111,178,.14); border-color: transparent; }
 .plus { color: var(--lamp-ok); font-weight: 600; }
 .minus { color: var(--accent); font-weight: 600; }
 
@@ -304,6 +305,7 @@ tr.short td { background: rgba(210,59,47,.08); }
         <a href="#stock-in" data-page="stock-in" data-roles="office">Stock in</a>
         <a href="#inventory" data-page="inventory" data-roles="office">Inventory</a>
         <a href="#projects" data-page="projects" data-roles="office">Projects</a>
+        <a href="#history" data-page="history" data-roles="office">History</a>
       </nav>
       <div class="sidebar-user">
         <div id="user-name" class="user-name"></div>
@@ -419,6 +421,30 @@ tr.short td { background: rgba(210,59,47,.08); }
         <div class="panel flush"><div class="table-wrap"><table id="proj-table"></table></div></div>
       </section>
 
+      <!-- HISTORY -->
+      <section id="page-history" class="page">
+        <header class="page-head">
+          <h2>History</h2>
+          <div class="head-actions"><button class="btn" id="hist-export" type="button">Export to Excel</button></div>
+        </header>
+        <div class="toolbar">
+          <label>From <input type="date" id="hist-from"></label>
+          <label>To <input type="date" id="hist-to"></label>
+          <select id="hist-type">
+            <option value="">All movements</option>
+            <option value="OUT">Stock out</option>
+            <option value="IN">Stock in</option>
+            <option value="RETURN">Returns</option>
+            <option value="ADJUST">Adjustments</option>
+            <option value="OPENING">Opening stock</option>
+            <option value="CORRECT">Project corrections</option>
+          </select>
+          <input type="search" id="hist-search" placeholder="Search voucher, model, project, person…">
+          <button class="btn btn-primary" id="hist-load" type="button">Show</button>
+        </div>
+        <div class="panel flush"><div class="table-wrap"><table id="hist-table"></table></div></div>
+      </section>
+
     </main>
   </div>
 
@@ -471,7 +497,7 @@ const db = initializeFirestore(fbApp, {
 // ---------------------------------------------------------------------
 const DEFAULT_BRANDS = ["ABB", "Schneider Electric", "Siemens", "Legrand", "Eaton", "Mitsubishi Electric", "LS Electric", "Chint", "Hager", "Terasaki"];
 const DEFAULT_CATEGORIES = ["ACB", "MCCB", "MCB", "RCCB / RCBO", "Contactor", "Overload relay", "Protection relay", "Changeover switch", "Isolator", "Meter", "Current transformer", "Indicator / Push button", "Busbar", "Terminal", "Enclosure", "Accessory", "Other"];
-const TYPE_LABEL = { OUT: "Stock out", IN: "Stock in", RETURN: "Return", ADJUST: "Adjustment", OPENING: "Opening stock" };
+const TYPE_LABEL = { OUT: "Stock out", IN: "Stock in", RETURN: "Return", ADJUST: "Adjustment", OPENING: "Opening stock", CORRECT: "Project correction" };
 const VOUCHER_PREFIX = { OUT: "SO-", IN: "SI-", RETURN: "SR-", ADJUST: "ADJ-" };
 const ROLE_LABEL = { office: "Office (limited)", admin: "Administrator", manager: "Manager", warehouse: "Warehouse", viewer: "Viewer (read only)", pending: "Waiting for approval", disabled: "Disabled" };
 
@@ -483,6 +509,7 @@ const state = {
   profile: null,       // { name, role }
   items: new Map(),    // itemId -> item
   projects: new Map(), // projectId -> project
+  historyRows: [],     // last loaded history result
   unsub: []
 };
 
@@ -698,6 +725,7 @@ function route() {
   document.querySelectorAll(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + page));
   document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
   $("#sidebar").classList.remove("open");
+  if (page === "history" && !state.historyRows.length) loadHistory();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", route);
@@ -1361,6 +1389,84 @@ $("#inv-import-file").addEventListener("change", async (e) => {
     console.error(err);
     toast("Couldn’t read that file: " + err.message, true);
   }
+});
+
+// ---------------------------------------------------------------------
+// Transactions table helpers
+// ---------------------------------------------------------------------
+function txTableHead() {
+  return `<thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Component</th><th class="num">Qty</th><th class="num">Balance</th><th>Project / supplier</th><th>Person</th><th>Entered by</th></tr></thead>`;
+}
+function txRow(t) {
+  const signCls = t.delta >= 0 ? "plus" : "minus";
+  const party = t.projectNo ? `${t.projectNo}, ${t.projectName}` : (t.supplier || t.remarks || "");
+  return `<tr>
+    <td class="nowrap">${fmtDateTime(t.createdAt)}</td>
+    <td class="nowrap">${esc(t.voucherNo || "")}</td>
+    <td><span class="tag tag-${esc(t.type)}">${esc(TYPE_LABEL[t.type] || t.type)}</span></td>
+    <td><div class="model">${esc(itemLabel(t))}</div><div class="desc">${esc(itemSub(t))}</div></td>
+    <td class="num ${signCls}">${t.delta >= 0 ? "+" : "−"}${fmtNum(Math.abs(t.delta))}</td>
+    <td class="num">${fmtNum(t.balanceAfter)}</td>
+    <td>${esc(party)}</td>
+    <td>${esc(t.issuedTo || "")}</td>
+    <td>${esc(t.userName || "")}</td>
+  </tr>`;
+}
+function txExportRow(t) {
+  const d = toDate(t.createdAt);
+  return {
+    Date: d ? d.toLocaleString() : "", Voucher: t.voucherNo, Type: TYPE_LABEL[t.type] || t.type,
+    Brand: t.brand, Model: t.model, Description: t.description, Category: t.category,
+    Quantity: t.delta, "Balance after": t.balanceAfter,
+    "Project no.": t.projectNo, "Project name": t.projectName, Supplier: t.supplier, Reference: t.reference,
+    "Issued to": t.issuedTo, Remarks: t.remarks, "Entered by": t.userName
+  };
+}
+
+// ---------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------
+(function initHistoryDates() {
+  const to = new Date(), from = new Date(); from.setDate(from.getDate() - 30);
+  $("#hist-from").value = isoDate(from);
+  $("#hist-to").value = isoDate(to);
+})();
+
+async function loadHistory() {
+  const from = new Date($("#hist-from").value + "T00:00:00");
+  const to = new Date($("#hist-to").value + "T00:00:00"); to.setDate(to.getDate() + 1);
+  if (isNaN(from) || isNaN(to)) return toast("Choose a valid date range.", true);
+  $("#hist-table").innerHTML = `<tbody>${emptyRow(9, "Loading…")}</tbody>`;
+  try {
+    const snap = await getDocs(query(collection(db, "transactions"),
+      where("createdAt", ">=", Timestamp.fromDate(from)), where("createdAt", "<", Timestamp.fromDate(to)),
+      orderBy("createdAt", "desc"), limit(3000)));
+    state.historyRows = snap.docs.map(docData);
+    renderHistory();
+  } catch (err) {
+    toast("Couldn’t load history: " + err.message, true);
+  }
+}
+function filteredHistory() {
+  const type = $("#hist-type").value;
+  const q = $("#hist-search").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return state.historyRows
+    .filter((t) => !type || t.type === type)
+    .filter((t) => {
+      if (!q.length) return true;
+      const hay = `${t.voucherNo} ${t.brand} ${t.model} ${t.description} ${t.projectNo} ${t.projectName} ${t.supplier} ${t.issuedTo} ${t.userName} ${t.reference} ${t.remarks}`.toLowerCase();
+      return q.every((w) => hay.includes(w));
+    });
+}
+function renderHistory() {
+  const rows = filteredHistory();
+  $("#hist-table").innerHTML = txTableHead() + `<tbody>${rows.length ? rows.map(txRow).join("") : emptyRow(9, "No movements in this period.")}</tbody>`;
+}
+$("#hist-load").addEventListener("click", loadHistory);
+$("#hist-type").addEventListener("change", renderHistory);
+$("#hist-search").addEventListener("input", renderHistory);
+$("#hist-export").addEventListener("click", () => {
+  exportSheets(`Stock movements ${$("#hist-from").value} to ${$("#hist-to").value}.xlsx`, { Movements: filteredHistory().map(txExportRow) });
 });
 
 // ---------------------------------------------------------------------
