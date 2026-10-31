@@ -2,8 +2,9 @@
 <!--
 =====================================================================
  SWITCHGEAR INVENTORY - OFFICE VERSION (restricted rights)
- Office can: view inventory + projects list, stock in, stock out, prepare/print delivery challans.
- Office cannot: edit / adjust / delete, open project details, see dashboard or history.
+ Office can: view inventory, stock in, stock out, manage projects (create/edit, project details,
+ edit quantities, export), prepare/print delivery challans.
+ Office cannot: edit / adjust / delete inventory items, see dashboard or history.
  Firebase project: synergy-5b2d3
 
  Firestore rules in use for now (Firebase console → Firestore → Rules):
@@ -214,8 +215,13 @@ tr.short td { background: rgba(210,59,47,.08); }
 .tag-OUT { background: var(--accent-soft); border-color: transparent; }
 .tag-IN, .tag-RETURN { background: rgba(47,158,79,.14); border-color: transparent; }
 .tag-ADJUST, .tag-OPENING { background: rgba(227,164,23,.18); border-color: transparent; }
+.tag-CORRECT { background: rgba(31,111,178,.14); border-color: transparent; }
 .plus { color: var(--lamp-ok); font-weight: 600; }
 .minus { color: var(--accent); font-weight: 600; }
+
+/* Wider modal for the project quantity editor */
+.modal.wide { max-width: 860px; }
+.change-note { font-size: 12px; color: var(--ink-soft); }
 
 /* Item picker */
 .picker-row { display: grid; grid-template-columns: 1fr 110px auto; gap: 10px; margin-bottom: 14px; }
@@ -441,6 +447,7 @@ tr.short td { background: rgba(210,59,47,.08); }
           </select>
         </div>
         <div class="panel flush"><div class="table-wrap"><table id="proj-table"></table></div></div>
+        <div id="proj-detail" class="hidden"></div>
       </section>
 
       <!-- DELIVERY CHALLAN -->
@@ -517,8 +524,8 @@ const db = initializeFirestore(fbApp, {
 // ---------------------------------------------------------------------
 const DEFAULT_BRANDS = ["ABB", "Schneider Electric", "Siemens", "Legrand", "Eaton", "Mitsubishi Electric", "LS Electric", "Chint", "Hager", "Terasaki"];
 const DEFAULT_CATEGORIES = ["ACB", "MCCB", "MCB", "RCCB / RCBO", "Contactor", "Overload relay", "Protection relay", "Changeover switch", "Isolator", "Meter", "Current transformer", "Indicator / Push button", "Busbar", "Terminal", "Enclosure", "Accessory", "Other"];
-const TYPE_LABEL = { OUT: "Stock out", IN: "Stock in", RETURN: "Return", ADJUST: "Adjustment", OPENING: "Opening stock" };
-const VOUCHER_PREFIX = { OUT: "SO-", IN: "SI-", RETURN: "SR-", ADJUST: "ADJ-" };
+const TYPE_LABEL = { OUT: "Stock out", IN: "Stock in", RETURN: "Return", ADJUST: "Adjustment", OPENING: "Opening stock", CORRECT: "Project correction" };
+const VOUCHER_PREFIX = { OUT: "SO-", IN: "SI-", RETURN: "SR-", ADJUST: "ADJ-", CORRECT: "PC-" };
 const ROLE_LABEL = { office: "Office (limited)", admin: "Administrator", manager: "Manager", warehouse: "Warehouse", viewer: "Viewer (read only)", pending: "Waiting for approval", disabled: "Disabled" };
 
 // ---------------------------------------------------------------------
@@ -529,6 +536,7 @@ const state = {
   profile: null,       // { name, role }
   items: new Map(),    // itemId -> item
   projects: new Map(), // projectId -> project
+  projectDetailRows: [],
   unsub: []
 };
 
@@ -610,11 +618,11 @@ function emptyRow(cols, text) {
 }
 
 // Generic modal. fields are read by onSubmit from the modal element.
-function openModal({ title, body, submitLabel = "Save", onSubmit, hideCancel = false, cancelLabel = "Cancel" }) {
+function openModal({ title, body, submitLabel = "Save", onSubmit, hideCancel = false, cancelLabel = "Cancel", wide = false }) {
   const root = $("#modal-root");
   root.innerHTML = `
     <div class="modal-backdrop">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal${wide ? " wide" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <header><h2 id="modal-title">${esc(title)}</h2></header>
         <div class="modal-body">${body}</div>
         <footer>
@@ -839,6 +847,45 @@ async function adjustStock(itemId, countedQty, reason) {
       projectId: "", projectNo: "", projectName: "", issuedTo: "", supplier: "", reference: "",
       remarks: reason, userId: state.user.uid, userName, createdAt: serverTimestamp()
     });
+    return voucherNo;
+  });
+}
+
+// Project quantity correction: sets the quantity used on a project to the
+// corrected figure. The difference is taken from stock (more used) or put
+// back into stock (less used), all in one transaction with one voucher.
+async function commitProjectCorrection(project, changes, reason) {
+  if (!navigator.onLine) throw new Error("No internet connection. Connect and try again.");
+  const counterRef = doc(db, "counters", "CORRECT");
+  const itemRefs = changes.map((c) => doc(db, "items", c.itemId));
+  return runTransaction(db, async (tx) => {
+    const [counterSnap, ...itemSnaps] = await Promise.all([tx.get(counterRef), ...itemRefs.map((r) => tx.get(r))]);
+    const updates = itemSnaps.map((snap, i) => {
+      if (!snap.exists()) throw new Error(`${changes[i].label} was deleted from the catalogue, so its quantity can’t be corrected.`);
+      const item = snap.data();
+      const current = Number(item.qty || 0);
+      const invDelta = -(changes[i].next - changes[i].current); // stock moves opposite to project usage
+      const next = current + invDelta;
+      if (next < 0) throw new Error(`Not enough stock for ${itemLabel(item)}: ${current} available, ${-invDelta} more needed.`);
+      return { ref: itemRefs[i], item, invDelta, next, change: changes[i] };
+    });
+    const seq = (counterSnap.exists() ? Number(counterSnap.data().seq || 0) : 0) + 1;
+    const voucherNo = VOUCHER_PREFIX.CORRECT + String(seq).padStart(6, "0");
+    tx.set(counterRef, { seq }, { merge: true });
+    const userName = state.profile.name || state.user.email;
+    for (const u of updates) {
+      tx.update(u.ref, { qty: u.next, updatedAt: serverTimestamp(), updatedBy: userName });
+      tx.set(doc(collection(db, "transactions")), {
+        voucherNo, type: "CORRECT",
+        itemId: u.ref.id, brand: u.item.brand, model: u.item.model,
+        description: u.item.description || "", category: u.item.category || "",
+        qty: Math.abs(u.invDelta), delta: u.invDelta, balanceAfter: u.next,
+        projectQtyBefore: u.change.current, projectQtyAfter: u.change.next,
+        projectId: project.id, projectNo: project.projectNo || "", projectName: project.name || "",
+        issuedTo: "", supplier: "", reference: "",
+        remarks: reason, userId: state.user.uid, userName, createdAt: serverTimestamp()
+      });
+    }
     return voucherNo;
   });
 }
@@ -1113,7 +1160,6 @@ function fillProjectSelects() {
 }
 
 function projectModal(existing) {
-  if (existing && !isManager()) return toast("You do not have permission to edit projects.", true);
   openModal({
     title: existing ? "Edit project" : "New project",
     body: `
@@ -1154,14 +1200,203 @@ function renderProjects() {
   const table = $("#proj-table");
   table.innerHTML = `<thead><tr><th>Project no.</th><th>Name</th><th>Client</th><th>Status</th><th>Created</th><th></th></tr></thead>
     <tbody>${list.length ? list.map((p) => `<tr>
-      <td>${esc(p.projectNo)}</td>
+      <td><button class="link" data-view="${esc(p.id)}">${esc(p.projectNo)}</button></td>
       <td>${esc(p.name)}</td><td>${esc(p.client || "")}</td><td>${esc(p.status || "Open")}</td>
       <td class="nowrap">${fmtDateTime(p.createdAt)}</td>
-      <td class="row-actions">${isManager() ? `<button class="btn btn-small" data-edit="${esc(p.id)}">Edit</button>` : ""}</td>
+      <td class="row-actions">${isStaff() ? `<button class="btn btn-small" data-edit="${esc(p.id)}">Edit</button>` : ""}</td>
     </tr>`).join("") : emptyRow(6, "No projects match. Create a project to start issuing stock to it.")}</tbody>`;
 }
 $("#proj-search").addEventListener("input", renderProjects);
 $("#proj-status").addEventListener("change", renderProjects);
+$("#proj-table").addEventListener("click", (e) => {
+  const v = e.target.closest("[data-view]"), ed = e.target.closest("[data-edit]");
+  if (v) showProjectDetail(v.dataset.view);
+  if (ed) projectModal(state.projects.get(ed.dataset.edit));
+});
+
+async function showProjectDetail(projectId) {
+  const p = state.projects.get(projectId);
+  const box = $("#proj-detail");
+  box.classList.remove("hidden");
+  box.innerHTML = `<div class="panel"><div class="spinner"></div></div>`;
+  const snap = await getDocs(query(collection(db, "transactions"), where("projectId", "==", projectId)));
+  const rows = snap.docs.map(docData).sort((a, b) => (toDate(b.createdAt) || 0) - (toDate(a.createdAt) || 0));
+  state.projectDetailRows = rows;
+
+  // Net usage per item = issued - returned
+  const agg = new Map();
+  for (const r of rows) {
+    const a = agg.get(r.itemId) || { itemId: r.itemId, brand: r.brand, model: r.model, description: r.description, category: r.category, issued: 0, returned: 0, corrected: 0 };
+    if (r.type === "OUT") a.issued += r.qty;
+    if (r.type === "RETURN") a.returned += r.qty;
+    if (r.type === "CORRECT") a.corrected += -Number(r.delta || 0); // + means more used on the project
+    agg.set(r.itemId, a);
+  }
+  const netOf = (a) => a.issued - a.returned + a.corrected;
+  const aggRows = [...agg.values()].sort((a, b) => `${a.brand}${a.model}${a.description}`.localeCompare(`${b.brand}${b.model}${b.description}`));
+  const totalIssued = aggRows.reduce((s, a) => s + a.issued, 0);
+  const totalReturned = aggRows.reduce((s, a) => s + a.returned, 0);
+  const totalCorrected = aggRows.reduce((s, a) => s + a.corrected, 0);
+  const canEdit = isStaff();
+  const signed = (n) => n ? `${n > 0 ? "+" : "−"}${fmtNum(Math.abs(n))}` : "0";
+
+  box.innerHTML = `<div class="panel">
+    <div class="detail-head">
+      <div><h3 style="margin:0">${esc(p.projectNo)}, ${esc(p.name)}</h3><div class="muted">${esc(p.client || "")}${p.client ? ", " : ""}${esc(p.status || "Open")}</div></div>
+      <div class="head-actions">${canEdit ? `<button class="btn btn-primary" id="proj-edit-qty" type="button">Edit quantities</button>` : ""}<button class="btn" id="proj-export" type="button">Export to Excel</button><button class="btn" id="proj-close" type="button">Close panel</button></div>
+    </div>
+    <div class="detail-stats">
+      <div><span class="muted">Units issued</span><strong>${fmtNum(totalIssued)}</strong></div>
+      <div><span class="muted">Units returned</span><strong>${fmtNum(totalReturned)}</strong></div>
+      ${totalCorrected ? `<div><span class="muted">Corrections</span><strong>${signed(totalCorrected)}</strong></div>` : ""}
+      <div><span class="muted">Net used</span><strong>${fmtNum(totalIssued - totalReturned + totalCorrected)}</strong></div>
+    </div>
+    <h3>Material used</h3>
+    <div class="table-wrap"><table id="proj-used"><thead><tr><th>Brand</th><th>Model</th><th>Description</th><th>Category</th><th class="num">Issued</th><th class="num">Returned</th><th class="num">Corrected</th><th class="num">Net</th>${canEdit ? "<th></th>" : ""}</tr></thead>
+    <tbody>${aggRows.length ? aggRows.map((a) => `<tr><td>${esc(a.brand)}</td><td class="model">${esc(a.model)}</td><td>${esc(a.description || "")}</td><td>${esc(a.category || "")}</td>
+      <td class="num">${fmtNum(a.issued)}</td><td class="num">${fmtNum(a.returned)}</td><td class="num ${a.corrected > 0 ? "minus" : a.corrected < 0 ? "plus" : ""}">${signed(a.corrected)}</td><td class="num"><strong>${fmtNum(netOf(a))}</strong></td>
+      ${canEdit ? `<td class="row-actions"><button class="btn btn-small" type="button" data-correct="${esc(a.itemId)}">Edit qty</button></td>` : ""}</tr>`).join("") : emptyRow(canEdit ? 9 : 8, "Nothing has been issued to this project yet.")}</tbody></table></div>
+    <h3 style="margin-top:18px">Movements</h3>
+    <div class="table-wrap"><table>${txTableHead()}<tbody>${rows.length ? rows.map(txRow).join("") : emptyRow(9, "No movements yet.")}</tbody></table></div>
+  </div>`;
+  $("#proj-close").addEventListener("click", () => box.classList.add("hidden"));
+  $("#proj-edit-qty")?.addEventListener("click", () => projectQtyModal(p, agg));
+  $("#proj-used").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-correct]");
+    if (b) projectQtyModal(p, agg, b.dataset.correct);
+  });
+  $("#proj-export").addEventListener("click", () => {
+    exportSheets(`Project ${p.projectNo}.xlsx`, {
+      "Material used": aggRows.map((a) => ({ Brand: a.brand, Model: a.model, Description: a.description, Category: a.category, Issued: a.issued, Returned: a.returned, Corrected: a.corrected, "Net used": netOf(a) })),
+      "Movements": rows.map(txExportRow)
+    });
+  });
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Edit the quantities used on a project (fix wrong entries, add missed items)
+function projectQtyModal(p, agg, focusId) {
+  const lines = new Map(); // itemId -> { current, next, label, sub, added }
+  for (const a of agg.values()) {
+    const net = a.issued - a.returned + a.corrected;
+    const live = state.items.get(a.itemId) || a;
+    lines.set(a.itemId, { current: net, next: net, label: live.description || itemLabel(live), sub: live.description ? "" : itemSub(live), added: false });
+  }
+  const { modal } = openModal({
+    title: `Edit quantities: ${p.projectNo}`,
+    wide: true,
+    body: `
+      <p class="muted">Enter the correct quantity used on this project. The difference is taken from stock or put back into stock, and saved in the history as a project correction.</p>
+      <div class="table-wrap"><table id="pe-lines" class="lines-table"></table></div>
+      <h3 style="margin:6px 0 0">Add a component missing from this project</h3>
+      <div id="pe-picker"></div>
+      <label>Reason for the correction <input id="pe-reason" placeholder="e.g. Wrong quantity entered on SO-000123"></label>`,
+    submitLabel: "Save corrections",
+    onSubmit: async (m) => {
+      const changes = [...lines.entries()]
+        .filter(([, l]) => l.next !== l.current)
+        .map(([itemId, l]) => ({ itemId, current: l.current, next: l.next, label: l.label }));
+      if (!changes.length) { toast("No quantities were changed.", true); return true; }
+      const reason = m.querySelector("#pe-reason").value.trim();
+      if (!reason) { toast("Enter a reason for the correction.", true); m.querySelector("#pe-reason").focus(); return true; }
+      const short = changes.find((c) => {
+        const it = state.items.get(c.itemId);
+        return !it || Number(it.qty || 0) - (c.next - c.current) < 0;
+      });
+      if (short) {
+        const it = state.items.get(short.itemId);
+        toast(it ? `Not enough stock for ${itemLabel(it)}: ${fmtNum(it.qty)} available, ${fmtNum(short.next - short.current)} more needed.` : `${short.label} is no longer in the catalogue.`, true);
+        return true;
+      }
+      const v = await commitProjectCorrection(p, changes, reason);
+      toast(`Corrections saved: ${v}`);
+      setTimeout(() => showProjectDetail(p.id), 200);
+    }
+  });
+  const table = modal.querySelector("#pe-lines");
+
+  function rowHtml(id, l) {
+    const it = state.items.get(id);
+    const diff = l.next - l.current;
+    const after = it ? Number(it.qty || 0) - diff : null;
+    const short = after !== null && after < 0;
+    const note = diff > 0 ? `${fmtNum(diff)} more taken from stock` : diff < 0 ? `${fmtNum(-diff)} back into stock` : "No change";
+    return `<tr class="${short ? "short" : ""}" data-id="${esc(id)}">
+      <td><div class="model">${esc(l.label)}</div><div class="desc">${esc(l.sub)}</div>
+        ${!it ? `<div class="short-note">No longer in the catalogue</div>` : short ? `<div class="short-note">Only ${fmtNum(it.qty)} in stock</div>` : ""}</td>
+      <td class="num">${l.added ? `<span class="muted">New</span>` : fmtNum(l.current)}</td>
+      <td class="num"><input type="number" min="0" step="1" value="${l.next}" data-qty aria-label="Correct quantity for ${esc(l.label)}" ${it ? "" : "disabled"}></td>
+      <td class="num nowrap"><span class="${diff > 0 ? "minus" : diff < 0 ? "plus" : "muted"}">${diff ? (diff > 0 ? "+" : "−") + fmtNum(Math.abs(diff)) : "0"}</span><div class="change-note">${note}</div></td>
+      <td class="num nowrap">${it ? `${lamp(stockStatus({ qty: after, minQty: it.minQty }))} ${fmtNum(after)}` : ""}</td>
+      <td class="num">${l.added ? `<button class="btn btn-small btn-danger" data-remove type="button">Remove</button>` : ""}</td>
+    </tr>`;
+  }
+  function render() {
+    if (!lines.size) {
+      table.innerHTML = `<tbody>${emptyRow(6, "Nothing has been issued to this project yet. Add a component below.")}</tbody>`;
+      return;
+    }
+    table.innerHTML = `<thead><tr><th>Component</th><th class="num">Now on project</th><th class="num">Correct qty</th><th class="num">Change</th><th class="num">Stock after</th><th></th></tr></thead>
+      <tbody>${[...lines.entries()].map(([id, l]) => rowHtml(id, l)).join("")}</tbody>`;
+  }
+
+  // Update only the edited row, so a click on another row or on Save isn't lost
+  table.addEventListener("change", (e) => {
+    if (!e.target.matches("[data-qty]")) return;
+    const tr = e.target.closest("tr");
+    const l = lines.get(tr.dataset.id);
+    const q = Math.floor(Number(e.target.value));
+    if (e.target.value === "" || !(q >= 0)) toast("Enter a quantity of 0 or more.", true);
+    else l.next = q;
+    tr.outerHTML = rowHtml(tr.dataset.id, l);
+  });
+  table.addEventListener("click", (e) => {
+    if (e.target.matches("[data-remove]")) { lines.delete(e.target.closest("tr").dataset.id); render(); }
+  });
+
+  createPicker(modal.querySelector("#pe-picker"), (item, qty) => {
+    const l = lines.get(item.id);
+    if (l) l.next += qty;
+    else lines.set(item.id, { current: 0, next: qty, label: item.description || itemLabel(item), sub: item.description ? "" : itemSub(item), added: true });
+    render();
+  }, { isOut: true, inList: (id) => { const l = lines.get(id); return l ? Math.max(0, l.next - l.current) : 0; } });
+
+  render();
+  const target = focusId ? table.querySelector(`tr[data-id="${CSS.escape(focusId)}"] [data-qty]`) : table.querySelector("[data-qty]");
+  if (target) { target.focus(); target.select(); }
+}
+
+// ---------------------------------------------------------------------
+// Transactions table helpers (movements list inside a project)
+// ---------------------------------------------------------------------
+function txTableHead() {
+  return `<thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Component</th><th class="num">Qty</th><th class="num">Balance</th><th>Project / supplier</th><th>Person</th><th>Entered by</th></tr></thead>`;
+}
+function txRow(t) {
+  const signCls = t.delta >= 0 ? "plus" : "minus";
+  const party = t.projectNo ? `${t.projectNo}, ${t.projectName}` : (t.supplier || t.remarks || "");
+  return `<tr>
+    <td class="nowrap">${fmtDateTime(t.createdAt)}</td>
+    <td class="nowrap">${esc(t.voucherNo || "")}</td>
+    <td><span class="tag tag-${esc(t.type)}">${esc(TYPE_LABEL[t.type] || t.type)}</span></td>
+    <td><div class="model">${esc(itemLabel(t))}</div><div class="desc">${esc(itemSub(t))}</div></td>
+    <td class="num ${signCls}">${t.delta >= 0 ? "+" : "−"}${fmtNum(Math.abs(t.delta))}</td>
+    <td class="num">${fmtNum(t.balanceAfter)}</td>
+    <td>${esc(party)}</td>
+    <td>${esc(t.issuedTo || "")}</td>
+    <td>${esc(t.userName || "")}</td>
+  </tr>`;
+}
+function txExportRow(t) {
+  const d = toDate(t.createdAt);
+  return {
+    Date: d ? d.toLocaleString() : "", Voucher: t.voucherNo, Type: TYPE_LABEL[t.type] || t.type,
+    Brand: t.brand, Model: t.model, Description: t.description, Category: t.category,
+    Quantity: t.delta, "Balance after": t.balanceAfter,
+    "Project no.": t.projectNo, "Project name": t.projectName, Supplier: t.supplier, Reference: t.reference,
+    "Issued to": t.issuedTo, Remarks: t.remarks, "Entered by": t.userName
+  };
+}
 
 // ---------------------------------------------------------------------
 // Inventory
